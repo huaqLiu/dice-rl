@@ -1,3 +1,0 @@
-[submodule "hardware_interfaces"]
-	path = hardware_interfaces
-	url = git@github.com:zhanyisun/hardware_interfaces.git
