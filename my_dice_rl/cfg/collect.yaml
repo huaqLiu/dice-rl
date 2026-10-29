@@ -1,0 +1,26 @@
+# Raw capture uses each camera's native RGB stream. Policy RGB matches DICE-RL-Robot.
+data_root: datasets/demonstrations
+task: gear_insertion
+record_hz: 10.0
+save_width: 224
+save_height: 224
+save_raw_rgb: true
+jpeg_quality: 95
+max_age_s: 0.25
+max_camera_skew_s: 0.06
+min_free_gb: 5.0
+min_episode_frames: 16
+base_frame: panda_link0
+ee_frame: panda_hand_tcp
+wrist_topic: /wrist/d435i/color/image_raw
+external_topic: /external/color/image_raw
+target_topic: /cartesian_impedance_target
+robot_state_topic: /franka_robot_state_broadcaster/robot_state
+gripper_topic: /panda_gripper/joint_states
+teleop_topic: /dice_spacemouse_teleop/recording_state
+teleop_enable_service: /dice_spacemouse_teleop/enable
+register_hold_service: /dice_spacemouse_teleop/register_hold
+gripper_joint_names: [panda_finger_joint1, panda_finger_joint2]
+camera_placement:
+  wrist: D435i mounted on wrist
+  external: Femto Bolt in front of robot; extrinsic calibration not yet supplied

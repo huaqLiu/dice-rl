@@ -1,0 +1,29 @@
+# Local Git metadata in imported projects
+.git/
+
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments and editor settings
+.env
+.env.*
+!.env.example
+!.env.sample
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+
+# Generated data and training output
+datasets/
+checkpoints/
+log_dir/
+wandb/
+*.log
