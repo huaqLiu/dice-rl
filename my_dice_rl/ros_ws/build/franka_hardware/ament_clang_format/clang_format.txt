@@ -1,0 +1,18 @@
+-- run_test.py: invoking following command in '/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_hardware':
+ - /opt/ros/humble/bin/ament_clang_format --xunit-file /home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test_results/franka_hardware/clang_format.xunit.xml src include --config ../.clang-format
+
+No code style divergence in file 'src/franka_hardware_interface.cpp'
+
+No code style divergence in file 'src/robot.cpp'
+
+No code style divergence in file 'include/franka_hardware/franka_hardware_interface.hpp'
+
+No code style divergence in file 'include/franka_hardware/model.hpp'
+
+No code style divergence in file 'include/franka_hardware/robot.hpp'
+
+No problems found
+
+
+-- run_test.py: return code 0
+-- run_test.py: verify result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test_results/franka_hardware/clang_format.xunit.xml'

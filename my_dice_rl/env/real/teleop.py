@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import json
 import threading
+import time
 from typing import Optional, Tuple
 
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
+from controller_manager_msgs.srv import ListControllers
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -18,6 +20,8 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from franka_msgs.msg import FrankaRobotState
 from franka_msgs.action import Grasp, Move
+from my_dice_rl.util.config import project_path
+from my_dice_rl.util.reset_motion import ResetTrajectory, load_reset_pose
 
 from my_dice_rl.util.spacemouse_math import (
     apply_deadband,
@@ -31,13 +35,16 @@ from my_dice_rl.util.spacemouse_math import (
 
 
 class FrankaSpaceMouseTeleop(Node):
-    """Convert SpaceMouse input into safe Cartesian impedance pose targets."""
+    """Convert SpaceMouse input into Cartesian pose targets for the configured controller."""
 
     def __init__(self) -> None:
         super().__init__("dice_spacemouse_teleop")
 
         self.declare_parameter("joy_topic", "/dice_spacemouse/joy")
         self.declare_parameter("target_topic", "/cartesian_impedance_target")
+        self.declare_parameter("controller_name", "panda_cartesian_impedance_controller")
+        self.declare_parameter("controller_command_interface", "effort")
+        self.declare_parameter("controller_service", "/controller_manager/list_controllers")
         self.declare_parameter(
             "robot_state_topic", "/franka_robot_state_broadcaster/robot_state"
         )
@@ -68,9 +75,21 @@ class FrankaSpaceMouseTeleop(Node):
         self.declare_parameter("max_position_error", 0.025)
         self.declare_parameter("max_orientation_error", 0.25)
         self.declare_parameter("enabled_on_startup", False)
+        self.declare_parameter('reset_reference_file', 'cfg/rl_review.yaml')
+        reset_defaults = dict(linear_speed=.02, angular_speed=.10, linear_acceleration=.05,
+            angular_acceleration=.30, max_distance=.15, max_angle=.60, position_tolerance=.003,
+            orientation_tolerance=.03, tracking_position_error=.025,
+            tracking_orientation_error=.25, timeout=30.)
+        self.reset_limits = {}
+        for key, default in reset_defaults.items():
+            self.declare_parameter('reset_' + key, default)
+            self.reset_limits[key] = float(self.get_parameter('reset_' + key).value)
+        self.reset_reference_file = project_path(self.get_parameter('reset_reference_file').value)
 
         self.joy_topic = str(self.get_parameter("joy_topic").value)
         self.target_topic = str(self.get_parameter("target_topic").value)
+        self.controller_name = str(self.get_parameter("controller_name").value)
+        self.controller_command_interface = str(self.get_parameter("controller_command_interface").value)
         self.robot_state_topic = str(self.get_parameter("robot_state_topic").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.ee_frame = str(self.get_parameter("ee_frame").value)
@@ -113,6 +132,7 @@ class FrankaSpaceMouseTeleop(Node):
         self._buttons = []
         self._last_joy_time: Optional[Time] = None
         self._last_robot_state_time: Optional[Time] = None
+        self._reset_robot_ok = False
         self._last_update_time = self.get_clock().now()
         self._was_commanding = False
         self._gripper_busy = False
@@ -127,7 +147,19 @@ class FrankaSpaceMouseTeleop(Node):
         self._latest_force = np.zeros(3, dtype=np.float64)
         self._latest_torque = np.zeros(3, dtype=np.float64)
         self._safety_latched = False
+        self._pause_reason = ""
         self._hold_requested = False
+        self._policy_locked = False
+        self._recording_locked = False
+        self._reset_plan = None
+        self._reset_message = ''
+        self._reset_settled_since = None
+        self._controller_active = False
+        self._controller_checked = 0.0
+        self._controller_future = None
+        self.controller_client = self.create_client(
+            ListControllers, str(self.get_parameter("controller_service").value))
+        self.controller_timer = self.create_timer(0.5, self._check_controller)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -148,6 +180,9 @@ class FrankaSpaceMouseTeleop(Node):
             SetBool, "~/enable", self._enable_callback
         )
         self.hold_service = self.create_service(Trigger, "~/register_hold", self._register_hold)
+        self.policy_lock_service = self.create_service(SetBool, "~/policy_lock", self._policy_lock)
+        self.reset_service = self.create_service(Trigger, '~/reset', self._start_reset)
+        self.recording_lock_service = self.create_service(SetBool, '~/recording_lock', self._recording_lock)
         self.gripper_move_client = ActionClient(self, Move, f"{self.gripper_namespace}/move")
         self.gripper_grasp_client = ActionClient(self, Grasp, f"{self.gripper_namespace}/grasp")
         self.gripper_state_subscription = self.create_subscription(
@@ -166,6 +201,10 @@ class FrankaSpaceMouseTeleop(Node):
         )
 
     def _validate_parameters(self) -> None:
+        if any(not np.isfinite(value) or value <= 0 for value in self.reset_limits.values()):
+            raise ValueError('Reset limits must be finite and positive')
+        if self.controller_command_interface not in {"effort", "position"}:
+            raise ValueError("controller_command_interface must be 'effort' or 'position'")
         if self.command_frame not in {"base", "tool"}:
             raise ValueError("command_frame must be 'base' or 'tool'")
         if self.control_rate <= 0.0:
@@ -216,11 +255,17 @@ class FrankaSpaceMouseTeleop(Node):
             self._buttons = list(message.buttons)
             self._last_joy_time = now
         # Seed button levels on startup/reconnect. A held button is not a click.
+        if self._reset_plan is not None:
+            if np.linalg.norm(mapped) > .01 or any(message.buttons):
+                self._cancel_reset('SpaceMouse 输入：复位已停止')
+            return
         if previous_time is None:
             return
         if (now - previous_time).nanoseconds * 1e-9 > self.joy_timeout:
             self._set_enabled(False)
             self.get_logger().warn("SpaceMouse reconnected; re-enable from GUI.")
+            return
+        if self._policy_locked:
             return
         if all(message.buttons[i] for i in (self.enable_button, self.gripper_button)):
             return  # A simultaneous two-button press is ambiguous.
@@ -241,6 +286,10 @@ class FrankaSpaceMouseTeleop(Node):
         if force_torque.size >= 6 and np.all(np.isfinite(force_torque[:6])):
             self._latest_force = force_torque[:3]
             self._latest_torque = force_torque[3:6]
+            errors = any(getattr(message.current_errors, name)
+                         for name in message.current_errors.get_fields_and_field_types())
+            self._reset_robot_ok = (message.robot_mode in (1, 2) and not errors
+                and not any(message.cartesian_collision) and not any(message.joint_collision))
             self._last_robot_state_time = self.get_clock().now()
 
     def _enable_callback(
@@ -250,8 +299,36 @@ class FrankaSpaceMouseTeleop(Node):
         self.get_logger().info(response.message)
         return response
 
+    def _check_controller(self) -> None:
+        if self._controller_future is None and self.controller_client.service_is_ready():
+            self._controller_future = self.controller_client.call_async(ListControllers.Request())
+            self._controller_future.add_done_callback(self._controller_done)
+
+    def _controller_done(self, future) -> None:
+        self._controller_future = None
+        try:
+            expected = {f"panda_joint{i}/{self.controller_command_interface}" for i in range(1, 8)}
+            self._controller_active = any(
+                c.name == self.controller_name and c.state == "active"
+                and set(c.claimed_interfaces) == expected
+                for c in future.result().controller)
+            self._controller_checked = time.monotonic()
+        except Exception:
+            self._controller_active = False
+
+    def _controller_ready(self) -> bool:
+        return self._controller_active and time.monotonic() - self._controller_checked < 2.0
+
     def _set_enabled(self, enabled: bool) -> Tuple[bool, str]:
+        if self._reset_plan is not None:
+            if enabled:
+                return False, '正在复位；先按暂停或移动 SpaceMouse 停止复位'
+            self._cancel_reset('复位已由操作员停止')
+        if enabled and self._policy_locked:
+            return False, "Policy owns the robot; finish the policy episode before manual reset."
         if enabled:
+            if not self._controller_ready():
+                return False, f"等待 {self.controller_name} active，并占用七个 {self.controller_command_interface} 接口。"
             if self.count_publishers(self.target_topic) > 1:
                 return False, "Another target publisher is running; stop the other teleop/policy first."
             if not self._wrench_is_safe(self.get_clock().now()):
@@ -263,12 +340,147 @@ class FrankaSpaceMouseTeleop(Node):
             if np.linalg.norm(self._axes) > 0.01:
                 return False, "Release SpaceMouse to neutral before enabling."
             self._safety_latched = False
+            self._reset_message = ''
         self._hold_requested = self._hold_requested or (self.enabled and not enabled)
+        self._pause_reason = ""
         self.enabled = enabled
         self._was_commanding = False
         self._target_position = None
         self._target_orientation = None
         return True, "teleoperation enabled" if enabled else "teleoperation disabled"
+
+    def _policy_lock(self, request, response):
+        if request.data and (self._reset_plan is not None or self._recording_locked):
+            response.success, response.message = False, '正在复位或录制示范，无法交接策略控制权'
+            return response
+        if request.data and self._gripper_busy:
+            response.success, response.message = False, 'Wait until the manual gripper action finishes.'
+            return response
+        if request.data:
+            pose = self._get_actual_pose()
+            if self.enabled and pose is None:
+                response.success, response.message = False, 'Cannot hand over without fresh measured pose.'
+                return response
+            was_enabled = self.enabled
+            self._set_enabled(False)
+            if was_enabled and pose is not None:
+                self._reset_target_to_actual(*pose)
+                self._publish_target(self.get_clock().now())
+            self._hold_requested = False
+        self._policy_locked = bool(request.data)
+        response.success = True
+        response.message = 'Policy lock acquired.' if request.data else 'Manual reset available; arm stays paused.'
+        return response
+
+    def _recording_lock(self, request, response):
+        if request.data and (self._policy_locked or self._reset_plan is not None):
+            response.success, response.message = False, '策略执行或复位期间禁止录制示范'
+        else:
+            self._recording_locked = bool(request.data)
+            response.success, response.message = True, '录制锁已更新'
+        return response
+
+    def _start_reset(self, request, response):
+        now = self.get_clock().now()
+        if self._recording_locked or self._policy_locked or self._reset_plan is not None:
+            response.success, response.message = False, '请先结束录制/策略执行，或等待当前复位结束'
+            return response
+        if (not self._controller_ready() or self.count_publishers(self.target_topic) > 1
+                or self._gripper_busy):
+            response.success, response.message = False, '等待控制器就绪、唯一目标发布者且夹爪空闲'
+            return response
+        if (self._last_joy_time is None
+                or (now - self._last_joy_time).nanoseconds * 1e-9 > self.joy_timeout
+                or np.linalg.norm(self._axes) > .01 or any(self._buttons)):
+            response.success, response.message = False, '请释放 SpaceMouse，等待新鲜中位输入'
+            return response
+        # Reset always requires fresh safe state, even if manual wrench checking was disabled.
+        if not self._reset_state_safe(now):
+            response.success, response.message = False, '机器人状态过旧或力/力矩超限，无法复位'
+            return response
+        actual = self._get_actual_pose()
+        try:
+            if actual is None:
+                raise ValueError('等待新鲜实际 TCP 位姿')
+            goal = load_reset_pose(self.reset_reference_file, self.base_frame, self.ee_frame)
+            limits = self.reset_limits
+            plan = ResetTrajectory(actual, goal, *(limits[key] for key in (
+                'linear_speed', 'angular_speed', 'linear_acceleration', 'angular_acceleration',
+                'max_distance', 'max_angle')))
+            if plan.duration + 1. >= limits['timeout']:
+                raise ValueError('预计复位时间超过配置上限，请先人工移近')
+        except (ValueError, OSError, TypeError, KeyError) as exc:
+            response.success, response.message = False, str(exc)
+            return response
+        self._set_enabled(False)
+        self._hold_requested = False
+        self._safety_latched = False
+        self._reset_plan, self._reset_goal = plan, goal
+        self._reset_started = now
+        self._last_update_time = now
+        self._reset_settled_since = None
+        self._reset_message = '正在直线复位；2 / 0 / Esc 或 SpaceMouse 输入可停止'
+        self._pause_reason = self._reset_message
+        self._reset_target_to_actual(*actual)
+        self._publish_target(now)
+        response.success, response.message = True, self._reset_message
+        return response
+
+    def _reset_state_safe(self, now):
+        return (self._last_robot_state_time is not None
+                and self._reset_robot_ok
+                and 0 <= (now - self._last_robot_state_time).nanoseconds * 1e-9 <= self.robot_state_timeout
+                and np.linalg.norm(self._latest_force) <= self.max_force
+                and np.linalg.norm(self._latest_torque) <= self.max_torque)
+
+    def _cancel_reset(self, reason, fault=False, keep_goal=False):
+        self._reset_plan = None
+        self.enabled = False
+        self._was_commanding = False
+        self._hold_requested = False
+        self._safety_latched = fault
+        self._reset_message = self._pause_reason = reason
+        if not keep_goal:
+            actual = self._get_actual_pose()
+            if actual is not None:
+                self._reset_target_to_actual(*actual)
+                self._publish_target(self.get_clock().now())
+        self._publish_twist(self.get_clock().now(), np.zeros(3), np.zeros(3))
+
+    def _reset_control_step(self, now, raw_dt, joy_fresh, axes):
+        actual = self._get_actual_pose()
+        reason = None
+        if raw_dt < 0 or raw_dt > .15 or not joy_fresh or np.linalg.norm(axes) > .01:
+            reason = '输入/控制周期异常，复位已停止'
+        elif (not self._controller_ready() or self.count_publishers(self.target_topic) > 1
+              or self._policy_locked or self._recording_locked):
+            reason = '控制权或控制器异常，复位已停止'
+        elif not self._reset_state_safe(now) or actual is None:
+            reason = '状态/TF 超时或力/力矩超限，复位已停止'
+        elapsed = (now - self._reset_started).nanoseconds * 1e-9
+        if elapsed > self.reset_limits['timeout']:
+            reason = '复位超时，请检查实际位置和受力'
+        if reason:
+            self._cancel_reset(reason, fault=True)
+            return
+        candidate = self._reset_plan.sample(elapsed)
+        error = np.linalg.norm(candidate[0] - actual[0])
+        angle = np.linalg.norm(quaternion_to_rotvec(quaternion_multiply(candidate[1], quaternion_inverse(actual[1]))))
+        if (error > self.reset_limits['tracking_position_error']
+                or angle > self.reset_limits['tracking_orientation_error']):
+            self._cancel_reset(f'复位跟踪误差超限：{error*1000:.1f} mm / {np.degrees(angle):.1f} 度', fault=True)
+            return
+        self._target_position, self._target_orientation = candidate
+        self._publish_target(now)
+        reached = (elapsed >= self._reset_plan.duration
+            and np.linalg.norm(self._reset_goal[0] - actual[0]) <= self.reset_limits['position_tolerance']
+            and angle <= self.reset_limits['orientation_tolerance'])
+        if not reached:
+            self._reset_settled_since = None
+        elif self._reset_settled_since is None:
+            self._reset_settled_since = now
+        elif (now - self._reset_settled_since).nanoseconds * 1e-9 >= .3:
+            self._cancel_reset('复位完成，保持暂停；按 1 启用遥操作', keep_goal=True)
 
     def _gripper_state_callback(self, message: JointState) -> None:
         age = (self.get_clock().now().nanoseconds * 1e-9
@@ -287,7 +499,9 @@ class FrankaSpaceMouseTeleop(Node):
     def _register_hold(self, request, response):
         """Record an existing grasp without sending a movement/grasp command."""
         now = self.get_clock().now()
-        if (self._gripper_busy or self._last_gripper_state_time is None
+        if self._policy_locked:
+            response.success, response.message = False, 'Policy owns the gripper.'
+        elif (self._gripper_busy or self._last_gripper_state_time is None
                 or (now - self._last_gripper_state_time).nanoseconds * 1e-9 > self.gripper_state_timeout):
             response.success, response.message = False, "等待新鲜夹爪状态且夹爪空闲"
         elif self._gripper_width >= self.gripper_open_width - 0.005:
@@ -302,6 +516,8 @@ class FrankaSpaceMouseTeleop(Node):
         return response
 
     def _command_gripper(self, closing: bool) -> None:
+        if self._policy_locked or self._reset_plan is not None:
+            return
         # Gripper operation is independent of arm-motion enable.
         if self._gripper_busy:
             self.get_logger().info("Gripper is moving; additional click ignored.")
@@ -386,7 +602,12 @@ class FrankaSpaceMouseTeleop(Node):
         message.data = json.dumps({
             "stamp": self.get_clock().now().nanoseconds * 1e-9,
             "enabled": self.enabled,
+            "policy_locked": self._policy_locked,
+            "resetting": self._reset_plan is not None,
+            "reset_message": self._reset_message,
+            "recording_locked": self._recording_locked,
             "safety_latched": self._safety_latched,
+            "pause_reason": self._pause_reason,
             "base_frame": self.base_frame,
             "ee_frame": self.ee_frame,
             "gripper_known": self._recording_gripper_width is not None,
@@ -466,7 +687,8 @@ class FrankaSpaceMouseTeleop(Node):
 
     def _control_step(self) -> None:
         now = self.get_clock().now()
-        dt = max(0.0, min((now - self._last_update_time).nanoseconds * 1e-9, 0.05))
+        raw_dt = (now - self._last_update_time).nanoseconds * 1e-9
+        dt = max(0.0, min(raw_dt, 0.05))
         self._last_update_time = now
 
         with self._lock:
@@ -476,9 +698,15 @@ class FrankaSpaceMouseTeleop(Node):
             last_joy_time is not None
             and (now - last_joy_time).nanoseconds * 1e-9 <= self.joy_timeout
         )
+        if self._reset_plan is not None:
+            self._reset_control_step(now, raw_dt, joy_fresh, axes)
+            return
         if not joy_fresh and last_joy_time is not None and self.enabled:
             self._set_enabled(False)
             self.get_logger().warn("SpaceMouse timeout; re-enable from GUI after reconnecting.")
+        if self.enabled and not self._controller_ready():
+            self._set_enabled(False)
+            self.get_logger().error("Configured controller unavailable or stale; teleoperation paused.")
 
         actual_pose = self._get_actual_pose()
         if actual_pose is None:
@@ -551,7 +779,13 @@ class FrankaSpaceMouseTeleop(Node):
             self._reset_target_to_actual(actual_position, actual_orientation)
             self._publish_target(now)
             self._hold_requested = False
-            self.get_logger().error("Pose tracking error exceeded; teleoperation paused.")
+            delta_mm = (candidate_position - actual_position) * 1000.0
+            self._pause_reason = (
+                f"位姿跟踪误差超限：位置 {error * 1000:.1f}/{self.max_position_error * 1000:.1f} mm，"
+                f"姿态 {np.degrees(orientation_error):.1f}/{np.degrees(self.max_orientation_error):.1f} 度；"
+                f"位置偏差 XYZ=[{delta_mm[0]:.1f}, {delta_mm[1]:.1f}, {delta_mm[2]:.1f}] mm"
+            )
+            self.get_logger().error(self._pause_reason + "; teleoperation paused.")
             return
 
         self._target_position = candidate_position
@@ -600,6 +834,11 @@ def main(args=None) -> None:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except Exception:
+        # ROS signal handling can close the context while spin is waking up.
+        # Preserve real runtime errors; only a context already shut down is expected.
+        if rclpy.ok():
+            raise
     finally:
         if rclpy.ok():
             node._set_enabled(False)

@@ -19,12 +19,13 @@ if [ "$demo" = true ]; then
     exec /usr/bin/python3 -m my_dice_rl.script.collect_gui "${gui_args[@]}"
 fi
 source /opt/ros/humble/setup.bash
-robot_setup="${DICE_ROBOT_SETUP:-/home/lhq/rl_franka/ros_ws/install/setup.bash}"
+robot_setup="${DICE_ROBOT_SETUP:-$project_root/ros_ws/install/setup.bash}"
 if [ ! -f "$robot_setup" ]; then
     echo "找不到 Franka ROS 工作空间，请设置 DICE_ROBOT_SETUP 指向 install/setup.bash" >&2
     exit 1
 fi
 source "$robot_setup"
+/usr/bin/python3 "$project_root/script/check_controller_setup.py" "$project_root/cfg/teleop.yaml"
 mkdir -p "$project_root/log_dir/collection"
 run_log="$(mktemp -d "$project_root/log_dir/collection/run_XXXXXXXX")"
 pids=()

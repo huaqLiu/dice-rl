@@ -2,6 +2,8 @@
 data_root: datasets/demonstrations
 task: gear_insertion
 record_hz: 10.0
+# 编码/写盘积压最多缓存 20 帧（10 Hz 下约 2 秒），持续过载仍中止，不丢帧补齐。
+writer_queue_capacity: 20
 save_width: 224
 save_height: 224
 save_raw_rgb: true
@@ -20,6 +22,8 @@ gripper_topic: /panda_gripper/joint_states
 teleop_topic: /dice_spacemouse_teleop/recording_state
 teleop_enable_service: /dice_spacemouse_teleop/enable
 register_hold_service: /dice_spacemouse_teleop/register_hold
+reset_service: /dice_spacemouse_teleop/reset
+recording_lock_service: /dice_spacemouse_teleop/recording_lock
 gripper_joint_names: [panda_finger_joint1, panda_finger_joint2]
 camera_placement:
   wrist: D435i mounted on wrist

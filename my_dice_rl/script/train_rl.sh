@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -eo pipefail
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$project_root/.."
+exec "$project_root/.venv-dp/bin/python" -m my_dice_rl.script.train_rl "$@"

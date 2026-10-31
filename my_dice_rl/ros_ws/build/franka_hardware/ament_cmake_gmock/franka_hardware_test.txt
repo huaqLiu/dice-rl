@@ -1,0 +1,58 @@
+-- run_test.py: invoking following command in '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test':
+ - /home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test/franka_hardware_test --gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test_results/franka_hardware/franka_hardware_test.gtest.xml
+
+[==========] Running 16 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 13 tests from FrankaHardwareInterfaceTest
+[ RUN      ] FrankaHardwareInterfaceTest.when_on_init_called_expect_success
+[       OK ] FrankaHardwareInterfaceTest.when_on_init_called_expect_success (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_set_when_read_called_return_ok
+[       OK ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_set_when_read_called_return_ok (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_return_zero_values_and_correct_interface_names
+[       OK ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_return_zero_values_and_correct_interface_names (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_model_interface_exists
+[       OK ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_model_interface_exists (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_state_interface_exists
+[       OK ] FrankaHardwareInterfaceTest.given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_state_interface_exists (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_for_stop_effort_interfaces_expect_ok
+[       OK ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_for_stop_effort_interfaces_expect_ok (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_is_called_with_invalid_start_interface_number_expect_throw
+[       OK ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_is_called_with_invalid_start_interface_number_expect_throw (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_for_start_effort_interfaces_expect_ok
+[       OK ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_for_start_effort_interfaces_expect_ok (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_is_called_with_invalid_stop_interface_number_expect_throw
+[       OK ] FrankaHardwareInterfaceTest.when_prepare_command_mode_interface_is_called_with_invalid_stop_interface_number_expect_throw (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_on_activate_called_expect_success
+[INFO] [1793332250.116508083] [FrankaHardwareInterface]: Started
+[       OK ] FrankaHardwareInterfaceTest.when_on_activate_called_expect_success (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.when_on_deactivate_called_expect_success
+[INFO] [1793332250.116531016] [FrankaHardwareInterface]: trying to Stop...
+[INFO] [1793332250.116534573] [FrankaHardwareInterface]: Stopped
+[       OK ] FrankaHardwareInterfaceTest.when_on_deactivate_called_expect_success (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_start_effort_interface_prepared_when_perform_comamnd_mode_switch_called_expect_ok
+[       OK ] FrankaHardwareInterfaceTest.given_start_effort_interface_prepared_when_perform_comamnd_mode_switch_called_expect_ok (0 ms)
+[ RUN      ] FrankaHardwareInterfaceTest.given_that_effort_control_started_perform_command_mode_switch_stop_expect_ok
+[       OK ] FrankaHardwareInterfaceTest.given_that_effort_control_started_perform_command_mode_switch_stop_expect_ok (0 ms)
+[----------] 13 tests from FrankaHardwareInterfaceTest (0 ms total)
+
+[----------] 1 test from FrankaHardwareIntefaceTest
+[ RUN      ] FrankaHardwareIntefaceTest.when_write_called_expect_ok
+[       OK ] FrankaHardwareIntefaceTest.when_write_called_expect_ok (0 ms)
+[----------] 1 test from FrankaHardwareIntefaceTest (0 ms total)
+
+[----------] 2 tests from FrankaHardwarePosition
+[ RUN      ] FrankaHardwarePosition.WritesPositionsAndRejectsMixedModes
+[ERROR] [1793332250.116623679] [FrankaHardwareInterface]: Effort and position control cannot run simultaneously
+[       OK ] FrankaHardwarePosition.WritesPositionsAndRejectsMixedModes (0 ms)
+[ RUN      ] FrankaHardwarePosition.RejectsPartialOrWrongJointSets
+[       OK ] FrankaHardwarePosition.RejectsPartialOrWrongJointSets (0 ms)
+[----------] 2 tests from FrankaHardwarePosition (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 16 tests from 3 test suites ran. (0 ms total)
+[  PASSED  ] 16 tests.
+
+
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test_results/franka_hardware/franka_hardware_test.gtest.xml'
+-- run_test.py: verify result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_hardware/test_results/franka_hardware/franka_hardware_test.gtest.xml'

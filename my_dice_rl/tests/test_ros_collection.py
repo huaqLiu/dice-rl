@@ -5,6 +5,8 @@ import time
 import h5py
 import numpy as np
 import rclpy
+from controller_manager_msgs.msg import ControllerState
+from controller_manager_msgs.srv import ListControllers
 from franka_msgs.msg import FrankaRobotState
 from geometry_msgs.msg import TransformStamped
 from rclpy.executors import SingleThreadedExecutor
@@ -25,6 +27,7 @@ def test_fake_ros_devices_record_real_backend(tmp_path):
         '-r', '/cartesian_impedance_target:=/dice_pipeline_test/target',
         '-r', '/dice_spacemouse/joy:=/dice_pipeline_test/joy',
         '-r', '/franka_robot_state_broadcaster/robot_state:=/dice_pipeline_test/state',
+        '-p', 'controller_service:=/dice_pipeline_test/list_controllers',
         '-p', 'gripper_namespace:=/dice_pipeline_test/gripper'])
     config = yaml.safe_load((Path(__file__).parents[1] / 'cfg/collect.yaml').read_text())
     config.update(data_root=str(tmp_path), min_free_gb=0,
@@ -38,6 +41,11 @@ def test_fake_ros_devices_record_real_backend(tmp_path):
     buffers = StreamBuffer()
     fake = Node('fake_devices')
     teleop = FrankaSpaceMouseTeleop()
+    def controllers(request, response):
+        response.controller = [ControllerState(name=teleop.controller_name, state='active',
+            claimed_interfaces=[f'panda_joint{i}/{teleop.controller_command_interface}' for i in range(1, 8)])]
+        return response
+    fake.create_service(ListControllers, '/dice_pipeline_test/list_controllers', controllers)
     collector = CollectorNode(config, buffers)
     tf = TransformBroadcaster(fake)
     images = [fake.create_publisher(Image, config[k + '_topic'], 10) for k in ['wrist', 'external']]

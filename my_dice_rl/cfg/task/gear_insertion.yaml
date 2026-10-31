@@ -1,0 +1,14 @@
+name: gear_insertion
+dataset_path: datasets/processed/gear_insertion.zarr
+base_frame: panda_link0
+ee_frame: panda_hand_tcp
+record_hz: 10.0
+# hold_existing is an explicit closed/grasp label, not the registered measured width.
+hold_target_width: 0.0
+obs_steps: 2
+horizon_steps: 20
+act_steps: 4
+sample_stride: 1
+val_ratio: 0.2
+split_seed: 42
+allow_demo: false

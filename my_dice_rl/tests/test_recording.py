@@ -60,6 +60,20 @@ def test_skew_unknown_gripper_and_disable_rejected():
         buffers.snapshot(100, .2, .06)
 
 
+def test_fresh_pause_reason_precedes_target_timeout_and_respects_causality():
+    buffers = StreamBuffer()
+    fill(buffers, 100)
+    telemetry = dict(buffers.latest('teleop').value, enabled=False,
+                     pause_reason='位姿跟踪误差超限：位置 25.2/25.0 mm')
+    buffers.put('teleop', telemetry, 100.01, 100.01)
+    assert buffers.snapshot(100, .2, .06)['teleop'].value['enabled']
+    buffers.buffers['target'].clear()
+    with pytest.raises(ValueError, match='遥操作已暂停：位姿跟踪误差超限'):
+        buffers.snapshot(100.02, .2, .06)
+    with pytest.raises(ValueError, match='超时'):
+        buffers.snapshot(101, .2, .06)
+
+
 def test_matches_buffered_camera_pair_when_latest_frames_are_skewed():
     buffers = StreamBuffer()
     fill(buffers, 100)

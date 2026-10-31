@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/position_step_test.dir/test/position_step_test.cpp.o -o position_step_test  gtest/libgtest_main.a gtest/libgtest.a -pthread 

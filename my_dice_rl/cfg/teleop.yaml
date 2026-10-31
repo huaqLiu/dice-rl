@@ -1,33 +1,49 @@
 dice_spacemouse_teleop:
   ros__parameters:
     joy_topic: /dice_spacemouse/joy
+    controller_name: panda_cartesian_impedance_controller
+    controller_command_interface: effort
+    controller_service: /controller_manager/list_controllers
     target_topic: /cartesian_impedance_target
     robot_state_topic: /franka_robot_state_broadcaster/robot_state
     base_frame: panda_link0
     ee_frame: panda_hand_tcp
     command_frame: base
     control_rate: 50.0
-    max_linear_speed: 0.025
-    max_angular_speed: 0.15
-    deadband: 0.05
-    response_exponent: 1.5
+    max_linear_speed: 0.08
+    max_angular_speed: 0.6
+    deadband: 0.02
+    response_exponent: 1.0
     # Linux js axes: X,Y,Z,RX,RY,RZ. Commands are in the Panda base frame.
-    axis_indices: [0, 1, 2, 3, 4, 5]
-    axis_signs: [1.0, -1.0, -1.0, 1.0, -1.0, -1.0]
-    enable_button: 0
-    gripper_button: 1
+    axis_indices: [1, 0, 2, 4, 3, 5]
+    axis_signs: [1.0, 1.0, -1.0, 1.0, 1.0, -1.0]
+    enable_button: 1
+    gripper_button: 0
     joy_timeout: 0.25
     gripper_namespace: /panda_gripper
     gripper_joint_names: [panda_finger_joint1, panda_finger_joint2]
     gripper_open_width: 0.08
     gripper_closed_width: 0.0
-    gripper_speed: 0.02
-    gripper_force: 10.0
+    gripper_speed: 0.03
+    gripper_force: 5.0
     gripper_state_timeout: 0.5
     enable_wrench_stop: true
     robot_state_timeout: 0.25
     max_force: 20.0
-    max_torque: 3.0
-    max_position_error: 0.025
-    max_orientation_error: 0.25
+    max_torque: 10.0
+    max_position_error: 1.0
+    max_orientation_error: 1.0
     enabled_on_startup: false
+    # 数字键 8 请求直线复位；先人工退出轴并确保路径畅通。不改变夹爪。
+    reset_reference_file: cfg/rl_review.yaml
+    reset_linear_speed: 0.1
+    reset_angular_speed: 0.10
+    reset_linear_acceleration: 0.2
+    reset_angular_acceleration: 0.30
+    reset_max_distance: 0.4
+    reset_max_angle: 1.0
+    reset_position_tolerance: 0.1
+    reset_orientation_tolerance: 0.5
+    reset_tracking_position_error: 0.1
+    reset_tracking_orientation_error: 0.8
+    reset_timeout: 30.0

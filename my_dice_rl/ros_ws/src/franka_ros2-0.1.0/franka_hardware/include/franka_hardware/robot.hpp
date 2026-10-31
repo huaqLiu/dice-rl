@@ -53,6 +53,9 @@ class Robot {
    */
   virtual void initializeTorqueControl();
 
+  /// Starts the FCI joint-position motion generator, not an external torque controller.
+  virtual void initializeJointPositionControl();
+
   /**
    * Starts a reading loop of the robot state. Before using this method make sure that no other
    * control or reading loop is currently active.
@@ -81,6 +84,10 @@ class Robot {
    */
   virtual void write(const std::array<double, 7>& efforts);
 
+  virtual void writePosition(const std::array<double, 7>& positions);
+
+  [[nodiscard]] virtual bool hasControlError() const { return control_error_; }
+
   /// @return true if there is no control or reading loop running.
   [[nodiscard]] virtual bool isStopped() const;
 
@@ -96,9 +103,11 @@ class Robot {
   std::mutex read_mutex_;
   std::mutex write_mutex_;
   std::atomic_bool finish_{false};
+  std::atomic_bool control_error_{false};
   bool stopped_ = true;
   franka::RobotState current_state_;
 
   std::array<double, 7> tau_command_{};
+  std::array<double, 7> position_command_{};
 };
 }  // namespace franka_hardware

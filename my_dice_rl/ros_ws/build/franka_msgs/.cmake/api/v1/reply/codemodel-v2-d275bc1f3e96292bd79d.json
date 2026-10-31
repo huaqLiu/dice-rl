@@ -1,0 +1,258 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-30f4e6f0654f4466614e.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						17,
+						18
+					]
+				},
+				{
+					"build" : "franka_msgs__py",
+					"jsonFile" : "directory-franka_msgs__py-1ab95c282e7290407ba7.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_msgs/franka_msgs__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				},
+				{
+					"build" : "franka_msgs__rs",
+					"jsonFile" : "directory-franka_msgs__rs-22312c43e8ff5c149b68.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_msgs/franka_msgs__rs",
+					"targetIndexes" : 
+					[
+						16
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "franka_msgs",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_franka_msgs_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_franka_msgs_egg-5c270aa4e87b3f6608f2.json",
+					"name" : "ament_cmake_python_build_franka_msgs_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_franka_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_franka_msgs-f2c63bd73a20c9b19fac.json",
+					"name" : "ament_cmake_python_copy_franka_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs-3b201fd78596cd0f58b7.json",
+					"name" : "franka_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__cpp-4efebd94c679ccffb20c.json",
+					"name" : "franka_msgs__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "franka_msgs__py::@2879cf63e72700d1419c",
+					"jsonFile" : "target-franka_msgs__py-191f83c2e0b72410933b.json",
+					"name" : "franka_msgs__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_generator_c-fdceaef47002a0086065.json",
+					"name" : "franka_msgs__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_generator_py-193fc83f2196ba288818.json",
+					"name" : "franka_msgs__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_c-b6279d13193bbd70b45a.json",
+					"name" : "franka_msgs__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_c__pyext-ccfbfe6cdefe728f4596.json",
+					"name" : "franka_msgs__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_cpp-d9d96810d8e598977650.json",
+					"name" : "franka_msgs__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_fastrtps_c-99de666a2b6df8020412.json",
+					"name" : "franka_msgs__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_fastrtps_c__pyext-f3ed4194db1a93dcd6fb.json",
+					"name" : "franka_msgs__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_fastrtps_cpp-b1de6e415ffc9592efae.json",
+					"name" : "franka_msgs__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_introspection_c-4da19400fcd16d61cb33.json",
+					"name" : "franka_msgs__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_introspection_c__pyext-193324c571bb16ab692b.json",
+					"name" : "franka_msgs__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs__rosidl_typesupport_introspection_cpp-6c0232cec803b399c4f1.json",
+					"name" : "franka_msgs__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "franka_msgs__rs::@b2679c630a073f3b2fd1",
+					"jsonFile" : "target-franka_msgs__rs-3b52db02f52f29465079.json",
+					"name" : "franka_msgs__rs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_msgs_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_msgs_uninstall-3a0e187a5b7930254780.json",
+					"name" : "franka_msgs_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-c79ef9aed19feccbae85.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_msgs",
+		"source" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

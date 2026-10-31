@@ -20,6 +20,7 @@ for key in ("QT_QPA_PLATFORM_PLUGIN_PATH", "QT_QPA_FONTDIR"):
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from my_dice_rl.util.recording import Recorder, STREAMS, StreamBuffer, letterbox, policy_image, mark_reviewed_success
+from my_dice_rl.script.gui_keys import bind_button_keys, install_numeric_editor_filter
 
 
 def show_rgb(label, rgb):
@@ -102,6 +103,10 @@ class Window(QtWidgets.QMainWindow):
         self.closing = False
         self.recorder = Recorder(config, buffers, demo)
         self.was_active = False
+        self.recording_lock_future = None
+        self.recording_locked = False
+        self.unlock_future = None
+        install_numeric_editor_filter(self)
         self.reviewed_paths = set()
         self.setWindowTitle("DICE-RL · Panda 齿轮装配采集" + (" [模拟模式]" if demo else ""))
         self.resize(1240, 880)
@@ -125,17 +130,21 @@ class Window(QtWidgets.QMainWindow):
         layout.addWidget(QtWidgets.QLabel("齿轮已夹持 → 对准 → 插入  ·  左键启用/暂停  ·  右键切换夹爪" +
                          ("    模拟数据保存至 _demo，不会混入真实数据" if demo else "")))
         controls = QtWidgets.QHBoxLayout()
-        for text, shortcut, action in (("启用遥操作", "F2", "enable"),
-                                       ("暂停遥操作", "F3", "pause"),
-                                       ("登记当前夹持（不移动夹爪）", "F4", "hold")):
+        self.control_buttons = {}
+        for text, shortcut, action in (("启用遥操作", "1", "enable"),
+                                       ("暂停 / 停止复位", "2", "pause"),
+                                       ("登记当前夹持", "3", "hold"),
+                                       ("回到初始位姿", "8", "reset")):
             button = QtWidgets.QPushButton(text + "  " + shortcut)
-            button.setShortcut(shortcut)
+            bind_button_keys(self, button, shortcut, *(['0', 'Esc'] if action == 'pause' else []))
             button.clicked.connect(lambda checked=False, a=action: self.control(a))
             controls.addWidget(button)
+            self.control_buttons[action] = button
         self.crop_preview = QtWidgets.QCheckBox("查看策略画面 224×224")
         self.crop_preview.setChecked(True)
         controls.addWidget(self.crop_preview)
         layout.addLayout(controls)
+        layout.addWidget(QtWidgets.QLabel('8：直线复位，不改变夹爪。请先结束录制、退出轴并确认路径畅通；2 / 0 / Esc 可停止。'))
         row = QtWidgets.QHBoxLayout()
         self.previews = {}
         for key, title in (("wrist", "腕部 · D435i"), ("external", "机械臂前方 · Femto Bolt")):
@@ -170,15 +179,15 @@ class Window(QtWidgets.QMainWindow):
         self.path_label.setWordWrap(True)
         layout.addWidget(self.path_label)
         buttons = QtWidgets.QHBoxLayout()
-        self.start_button = QtWidgets.QPushButton("开始录制  F5")
+        self.start_button = QtWidgets.QPushButton("开始录制  4")
         self.start_button.clicked.connect(self.start)
-        self.start_button.setShortcut("F5")
+        bind_button_keys(self, self.start_button, '4')
         buttons.addWidget(self.start_button)
         self.stop_buttons = []
-        for text, key, status in (("结束 · 成功", "F6", "success"),
-                                  ("结束 · 失败", "F7", "failed"), ("丢弃本条", "F8", "discarded")):
+        for text, key, status in (("结束 · 成功", "5", "success"),
+                                  ("结束 · 失败", "6", "failed"), ("丢弃本条", "7", "discarded")):
             button = QtWidgets.QPushButton(text + "  " + key)
-            button.setShortcut(key)
+            bind_button_keys(self, button, key)
             button.clicked.connect(lambda checked=False, s=status: self.stop(s))
             buttons.addWidget(button)
             self.stop_buttons.append(button)
@@ -216,23 +225,64 @@ class Window(QtWidgets.QMainWindow):
         if self.recorder.demo:
             self.status.setText("模拟模式：不发送机器人指令")
             return
-        if action == 'hold' and self.recorder.active:
+        if action in ('hold', 'reset') and (self.recorder.active or self.recording_lock_future is not None
+                                           or self.recording_locked or self.closing):
             return
         if self.backend is not None:
             self.backend.request_control(action)
 
     def start(self):
+        if (self.closing or self.recorder.active or self.recording_lock_future is not None
+                or self.recording_locked or self.unlock_future is not None):
+            return
+        try:
+            self.recorder.ready()
+            if self.backend is not None:
+                self.recording_lock_future = self.backend.request_recording_lock(True)
+            else:
+                self._begin_recording()
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "无法开始录制", str(exc))
+
+    def _begin_recording(self):
         try:
             self.recorder.start(self.task.text().strip())
             self.was_active = True
         except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "无法开始录制", str(exc))
+            self.recorder.message = '无法开始录制：' + str(exc)
+
+    def _update_recording_lock(self):
+        if self.unlock_future is not None and self.unlock_future.done():
+            future, self.unlock_future = self.unlock_future, None
+            try:
+                if not future.result().success:
+                    raise ValueError(future.result().message)
+                self.recording_locked = False
+            except Exception as exc:
+                self.recorder.message = '释放录制锁失败：' + str(exc)
+        if self.recording_lock_future is not None and self.recording_lock_future.done():
+            future, self.recording_lock_future = self.recording_lock_future, None
+            try:
+                response = future.result()
+                if not response.success:
+                    raise ValueError(response.message)
+                self.recording_locked = True
+                if not self.closing:
+                    self._begin_recording()
+            except Exception as exc:
+                self.recorder.message = '无法开始录制：' + str(exc)
+        if self.recording_locked and not self.recorder.active and self.unlock_future is None:
+            try:
+                self.unlock_future = self.backend.request_recording_lock(False)
+            except ValueError as exc:
+                self.recorder.message = str(exc)
 
     def stop(self, status):
         if self.recorder.active:
             self.recorder.stop(status, self.notes.text())
 
     def update_status(self):
+        self._update_recording_lock()
         now = time.monotonic()
         for key, label in self.previews.items():
             sample = self.buffers.latest(key)
@@ -255,8 +305,14 @@ class Window(QtWidgets.QMainWindow):
         except ValueError as exc:
             ready, reason = False, str(exc)
         active = self.recorder.active
-        self.start_button.setEnabled(ready and not active)
-        self.task.setEnabled(not active)
+        busy = active or self.recording_lock_future is not None or self.recording_locked or self.closing
+        self.start_button.setEnabled(ready and not busy)
+        self.task.setEnabled(not busy)
+        telemetry = self.buffers.latest('teleop')
+        resetting = bool(telemetry and telemetry.value.get('resetting'))
+        for action in ('hold', 'reset'):
+            self.control_buttons[action].setEnabled(not busy and not resetting)
+        self.control_buttons['enable'].setEnabled(not resetting and not self.closing)
         for button in self.stop_buttons:
             button.setEnabled(active and not self.recorder.stop_event.is_set())
         if self.was_active and not active:
@@ -270,6 +326,9 @@ class Window(QtWidgets.QMainWindow):
         free = shutil.disk_usage(disk_path).free / 1e9
         frames = self.recorder.writer.count if self.recorder.writer else 0
         text = f"{self.recorder.message} · {frames} 帧 · {frames / self.config['record_hz']:.1f} s · 剩余 {free:.1f} GB"
+        if self.recorder.writer is not None:
+            text += (f"\n已采 {self.recorder.sampled_frames} / 已写 {frames} · "
+                     f"待写 {self.recorder.pending.qsize()}/{self.recorder.queue_capacity} 帧")
         if not active:
             text += "\n" + reason
         self.status.setText(text)
@@ -279,9 +338,9 @@ class Window(QtWidgets.QMainWindow):
             p = eef.value[:3]
             telemetry = self.buffers.latest('teleop')
             state = telemetry.value if telemetry else {}
-            enabled = "启用" if state.get('enabled') else "暂停"
+            enabled = '复位中' if state.get('resetting') else ("启用" if state.get('enabled') else "暂停")
             force = np.linalg.norm(state.get('force', [0., 0., 0.]))
-            message = self.backend.control_message if self.backend else ""
+            message = state.get('reset_message') or (self.backend.control_message if self.backend else "")
             self.robot_detail.setText(f"末端 / m：{p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}  "
                 f"夹爪：{grip.value * 1000:.1f} mm  外力：{force:.1f} N  遥操作：{enabled}  {message}")
 
@@ -374,6 +433,11 @@ class Window(QtWidgets.QMainWindow):
             event.ignore()
             QtCore.QTimer.singleShot(200, self.close)
             return
+        self._update_recording_lock()
+        if self.recording_lock_future is not None or self.recording_locked or self.unlock_future is not None:
+            event.ignore()
+            QtCore.QTimer.singleShot(200, self.close)
+            return
         event.accept()
 
 
@@ -424,12 +488,12 @@ def main():
     else:
         import rclpy
         from rclpy.executors import SingleThreadedExecutor
-        from my_dice_rl.env.real.ros_backend import CollectorNode
+        from my_dice_rl.env.real.ros_backend import CollectorNode, spin_until_shutdown
         rclpy.init(args=[])
         node = CollectorNode(config, buffers)
         executor = SingleThreadedExecutor()
         executor.add_node(node)
-        worker = threading.Thread(target=executor.spin, daemon=True)
+        worker = threading.Thread(target=spin_until_shutdown, args=(executor,), daemon=True)
     worker.start()
     window = Window(config, buffers, args.demo, node)
     window.show()
@@ -448,7 +512,7 @@ def main():
         worker.join(timeout=2)
         if node:
             node.destroy_node()
-            rclpy.shutdown()
+            rclpy.try_shutdown()
     if args.smoke_seconds:
         print(window.recorder.message)
         print(window.recorder.last_path)

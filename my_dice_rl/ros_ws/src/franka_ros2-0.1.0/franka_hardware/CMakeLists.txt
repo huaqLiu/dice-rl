@@ -49,6 +49,7 @@ install(
         DIRECTORY include/
         DESTINATION include
 )
+install(FILES config/command_interfaces.yaml DESTINATION share/${PROJECT_NAME}/config)
 
 
 if(BUILD_TESTING)

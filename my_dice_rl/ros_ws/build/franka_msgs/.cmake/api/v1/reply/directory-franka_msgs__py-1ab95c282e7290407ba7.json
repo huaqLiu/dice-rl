@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "franka_msgs__py",
+		"source" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_msgs/franka_msgs__py"
+	}
+}

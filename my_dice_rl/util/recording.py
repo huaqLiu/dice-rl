@@ -1,10 +1,12 @@
 """ROS/Qt independent recording, causal sampling and atomic episode storage."""
 from collections import deque
+import copy
 from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import shutil
 import threading
@@ -85,6 +87,14 @@ class StreamBuffer:
 
     def snapshot(self, tick, max_age, max_skew):
         with self.lock:
+            # A protective pause stops target publication. Show the cause before its stale target.
+            telemetry = next((s for s in reversed(self.buffers["teleop"]) if s.received <= tick), None)
+            if telemetry is not None and telemetry.value.get('resetting'):
+                raise ValueError('正在复位，禁止录制示范')
+            if ("teleop" not in self.errors and telemetry is not None
+                    and tick - telemetry.received <= max_age
+                    and not telemetry.value.get("enabled") and telemetry.value.get("pause_reason")):
+                raise ValueError("遥操作已暂停：" + telemetry.value["pause_reason"])
             result = {}
             for key, buffer in self.buffers.items():
                 if key in self.errors:
@@ -171,9 +181,11 @@ class EpisodeWriter:
         ds.resize(self.count + 1, axis=0)
         ds[self.count] = value
 
-    def append(self, tick, samples):
+    def append(self, tick, samples, wall_timestamp=None):
+        started = time.monotonic()
         values = {
-            "timestamp": np.float64(tick), "wall_timestamp": np.float64(time.time()),
+            "timestamp": np.float64(tick),
+            "wall_timestamp": np.float64(time.time() if wall_timestamp is None else wall_timestamp),
             "robot_eef_pose": np.asarray(samples["eef"].value, dtype=np.float64),
             "target_eef_pose": np.asarray(samples["target"].value, dtype=np.float64),
             "gripper_width": np.array([samples["gripper"].value], dtype=np.float32),
@@ -208,6 +220,7 @@ class EpisodeWriter:
                 if not ok:
                     raise IOError("原始 RGB 编码失败")
                 encoded['raw_' + key] = raw.reshape(-1)
+        encoded_at = time.monotonic()
         for key, value in values.items():
             self._append(key, value)
         for key in STREAMS:
@@ -224,6 +237,25 @@ class EpisodeWriter:
         self.count += 1
         if self.count % 10 == 0:
             self.file.flush()
+        finished = time.monotonic()
+        return dict(encode_ms=(encoded_at-started)*1000,
+                    hdf5_write_ms=(finished-encoded_at)*1000,
+                    append_total_ms=(finished-started)*1000)
+
+    def abort(self, reason):
+        """A failed row must remain partial; never rename it as a complete trajectory."""
+        if self.closed:
+            return self.path
+        self.closed = True
+        try:
+            self.file.attrs['frames'] = self.count
+            self.file.flush()
+        finally:
+            self.file.close()
+        self.metadata.update(status='invalid', frames=self.count, reason=reason,
+                             finished_at=datetime.now().astimezone().isoformat())
+        atomic_json(self.path / 'metadata.json', self.metadata)
+        return self.path
 
     def close(self, status, reason="", notes=""):
         if self.closed:
@@ -257,6 +289,15 @@ class Recorder:
         self.notes = ""
         self.message = "等待设备就绪"
         self.last_path = None
+        capacity = self.config.get('writer_queue_capacity', 20)
+        if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1:
+            raise ValueError('writer_queue_capacity 必须为正整数')
+        self.queue_capacity = capacity
+        self.pending = queue.Queue(maxsize=capacity)
+        self.sampled_frames = 0
+        self.queue_peak = 0
+        self.sampling_done = threading.Event()
+        self._writer_error = ''
 
     @property
     def active(self):
@@ -288,6 +329,11 @@ class Recorder:
         self.writer = EpisodeWriter(self.session, {**self.config, "task": task,
                                                    "simulated": self.demo}, info)
         self.stop_event.clear()
+        self.sampling_done.clear()
+        self.pending = queue.Queue(maxsize=self.queue_capacity)
+        self.sampled_frames, self.queue_peak = 0, 0
+        self._writer_error = ''
+        self._sampler_stats, self._writer_stats = {}, {}
         self.requested_status, self.notes = "failed", ""
         self.message = "正在录制"
         self.thread = threading.Thread(target=self._run, daemon=False)
@@ -296,10 +342,55 @@ class Recorder:
     def stop(self, status, notes=""):
         if status not in ("success", "failed", "discarded"):
             raise ValueError(status)
+        if self.stop_event.is_set():
+            return
         self.requested_status, self.notes = status, notes
+        self.message = '已停止采样，正在完成保存……'
         self.stop_event.set()
 
+    @staticmethod
+    def _update_stats(stats, metrics):
+        for key, value in metrics.items():
+            item = stats.setdefault(key, dict(count=0, total_ms=0., max_ms=0.))
+            item['count'] += 1
+            item['total_ms'] += float(value)
+            item['max_ms'] = max(item['max_ms'], float(value))
+
+    @staticmethod
+    def _summarize_stats(stats):
+        return {key: dict(count=v['count'], mean_ms=v['total_ms']/v['count'], max_ms=v['max_ms'])
+                for key, v in stats.items()}
+
+    def _write(self):
+        """Only this worker encodes frames and accesses the HDF5 while sampling."""
+        try:
+            with (self.writer.path / 'timing.jsonl').open('x', encoding='utf-8') as diagnostics:
+                while not self.sampling_done.is_set() or not self.pending.empty():
+                    try:
+                        tick, samples, sampled_wall, enqueued, sampling_metrics = self.pending.get(timeout=.05)
+                    except queue.Empty:
+                        continue
+                    started = time.monotonic()
+                    disk_ms = 0.
+                    if self.writer.count % 10 == 0:
+                        check_started = time.monotonic()
+                        if shutil.disk_usage(self.session).free < self.config['min_free_gb'] * 1e9:
+                            raise ValueError('剩余磁盘空间低于阈值')
+                        disk_ms = (time.monotonic()-check_started)*1000
+                    metrics = self.writer.append(tick, samples, wall_timestamp=sampled_wall)
+                    metrics.update(queue_wait_ms=(started-enqueued)*1000, disk_check_ms=disk_ms,
+                                   worker_total_ms=(time.monotonic()-started)*1000)
+                    self._update_stats(self._writer_stats, metrics)
+                    diagnostics.write(json.dumps(dict(frame=self.writer.count-1, tick=tick,
+                        sampled_wall_timestamp=sampled_wall, queue_depth=self.pending.qsize(),
+                        **sampling_metrics, **metrics), allow_nan=False) + '\n')
+        except Exception as exc:
+            self._writer_error = '编码/写盘线程异常：' + str(exc)
+            self.stop_event.set()
+
     def _run(self):
+        writer_thread = threading.Thread(target=self._write, name='dice_demo_writer', daemon=False)
+        writer_thread.start()
         period = 1.0 / self.config["record_hz"]
         tick = time.monotonic()
         status, reason = "invalid", ""
@@ -307,25 +398,64 @@ class Recorder:
             while not self.stop_event.is_set():
                 now = time.monotonic()
                 if now - tick > period:
-                    raise ValueError("写入或调度落后一个采样周期，已停止本条")
+                    raise ValueError(f'采样线程调度落后一个周期：{(now-tick)*1000:.1f} ms > {period*1000:.1f} ms，已停止本条')
+                sampled_wall = time.time()
+                snapshot_started = time.monotonic()
                 samples = self.buffers.snapshot(tick, self.config["max_age_s"],
                                                 self.config["max_camera_skew_s"])
-                if self.writer.count % 10 == 0:
-                    if shutil.disk_usage(self.session).free < self.config["min_free_gb"] * 1e9:
-                        raise ValueError("剩余磁盘空间低于阈值")
-                self.writer.append(tick, samples)
+                # Queued observations must not change when a sensor reuses its array.
+                samples = copy.deepcopy(samples)
+                enqueued = time.monotonic()
+                if enqueued-tick > period:
+                    raise ValueError('观测快照/复制落后一个采样周期，已停止本条')
+                metrics = dict(sampling_delay_ms=(now-tick)*1000,
+                               snapshot_copy_ms=(enqueued-snapshot_started)*1000)
+                try:
+                    self.pending.put_nowait((tick, samples, sampled_wall, enqueued, metrics))
+                except queue.Full as exc:
+                    raise ValueError(f'写盘队列已满（{self.queue_capacity} 帧），已停止本条；请降低计算/存储负载') from exc
+                self.sampled_frames += 1
+                self.queue_peak = max(self.queue_peak, self.pending.qsize())
+                self._update_stats(self._sampler_stats, metrics)
                 tick += period
                 self.stop_event.wait(max(0, tick - time.monotonic()))
             status = self.requested_status
-            if status == "success" and self.writer.count < self.config["min_episode_frames"]:
-                status, reason = "invalid", "演示过短"
         except Exception as exc:
             reason = str(exc)
+            self.stop_event.set()
+        finally:
+            self.sampling_done.set()
+        self.message = (reason + '；' if reason else '') + '正在完成已采帧的保存……'
+        # Keep active/recording lock until every accepted frame is saved and closed.
+        writer_thread.join()
+        if self._writer_error:
+            status, reason = 'invalid', self._writer_error
+        elif self.writer.count != self.sampled_frames:
+            status, reason = 'invalid', '已采帧数与已写帧数不一致'
+        if status == 'success' and self.writer.count < self.config['min_episode_frames']:
+            status, reason = 'invalid', '演示过短'
+        self.writer.metadata['wall_timestamp_convention'] = 'host wall time at sampling, not delayed disk write'
+        self.writer.metadata['performance'] = dict(mode='async_sampler_writer_v1',
+            queue_capacity=self.queue_capacity, queue_peak=self.queue_peak,
+            sampled_frames=self.sampled_frames, written_frames=self.writer.count,
+            sampler=self._summarize_stats(self._sampler_stats),
+            writer=self._summarize_stats(self._writer_stats), diagnostic_file='timing.jsonl')
         try:
-            self.last_path = self.writer.close(status, reason, self.notes)
+            if self._writer_error:
+                self.writer.metadata['notes'] = self.notes
+                self.last_path = self.writer.abort(reason)
+            else:
+                self.last_path = self.writer.close(status, reason, self.notes)
             self.message = f"{status} · {self.writer.count} 帧" + (f" · {reason}" if reason else "")
         except Exception as exc:
             self.message = f"保存失败，保留 partial 文件供检查：{exc}"
+        finally:
+            # Release unconsumed image arrays after a writer failure.
+            while not self.pending.empty():
+                try:
+                    self.pending.get_nowait()
+                except queue.Empty:
+                    break
 
 
 def mark_reviewed_success(episode_path, note):

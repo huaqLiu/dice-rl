@@ -1,0 +1,8 @@
+-r model/requirements.txt
+numpy>=1.23,<2
+zarr==2.18.2
+numcodecs==0.12.1
+h5py>=3.7
+PyYAML>=5.4
+opencv-python>=4.5,<4.12
+tqdm>=4.60

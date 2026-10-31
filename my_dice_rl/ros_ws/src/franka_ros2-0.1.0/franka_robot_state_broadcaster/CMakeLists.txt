@@ -66,6 +66,7 @@ install(
 
 
 if(BUILD_TESTING)
+    find_package(Franka REQUIRED)
     find_package(ament_cmake_gmock REQUIRED)
     find_package(ament_cmake_clang_format REQUIRED)
     find_package(ament_cmake_copyright REQUIRED)
@@ -95,7 +96,7 @@ if(BUILD_TESTING)
         test/test_franka_robot_state_broadcaster.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test/franka_robot_state_broadcaster_parameters.yaml)
     target_include_directories(${PROJECT_NAME}_test PRIVATE include)
-    target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+    target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME} Franka::Franka)
     ament_target_dependencies(${PROJECT_NAME}_test controller_manager hardware_interface)
 
     ament_add_gmock(test_load_franka_robot_state_broadcaster test/test_load_franka_robot_state_broadcaster.cpp)

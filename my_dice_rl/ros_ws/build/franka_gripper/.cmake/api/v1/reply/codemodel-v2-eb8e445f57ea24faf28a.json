@@ -1,0 +1,106 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-dcc0b62fe4b013d6a9ee.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "franka_gripper",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_franka_gripper_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_franka_gripper_egg-0369625492c1dfebba68.json",
+					"name" : "ament_cmake_python_build_franka_gripper_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_franka_gripper::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_franka_gripper-c869367b14ace8aa66f5.json",
+					"name" : "ament_cmake_python_copy_franka_gripper",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_gripper_node::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_gripper_node-dee7f228553ad6516d69.json",
+					"name" : "franka_gripper_node",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "franka_gripper_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-franka_gripper_uninstall-cf56e5bdbe4e8140805d.json",
+					"name" : "franka_gripper_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "gripper_server::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-gripper_server-be421d0222e6c2562816.json",
+					"name" : "gripper_server",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-d4a94470a47e8a9785da.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/franka_gripper",
+		"source" : "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_gripper"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

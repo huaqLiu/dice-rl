@@ -1,0 +1,79 @@
+{
+  "based_on": "../tilt_40deg_lightweight/Panda_D435i_Wrist_Mount_40deg_Lightweight.step",
+  "angle_degrees": 40.0,
+  "camera_outward_offset_mm": 8.0,
+  "camera_lift_mm": 5.0,
+  "original_cad_volume_mm3": 64042.85363433617,
+  "lightweight_cad_volume_mm3": 37357.43762745488,
+  "solid_volume_reduction_percent": 41.66806207488243,
+  "removed_features": [
+    {
+      "feature": "Open window between camera mounting arms",
+      "removed_volume_mm3": 8972.136161514944
+    },
+    {
+      "feature": "Rounded side window Y=-18",
+      "removed_volume_mm3": 4265.122255220012
+    },
+    {
+      "feature": "Rounded side window Y=18",
+      "removed_volume_mm3": 4265.122252060311
+    },
+    {
+      "feature": "Trim unused raised shoulder Y=-30",
+      "removed_volume_mm3": 2380.7083372786437
+    },
+    {
+      "feature": "Trim unused raised shoulder Y=10",
+      "removed_volume_mm3": 2380.7083360854813
+    },
+    {
+      "feature": "Side lip removed flush with the rear wall",
+      "removed_volume_mm3": 4421.618664725545
+    }
+  ],
+  "protected_interface_difference_mm3": {
+    "All geometry on the retained side of the flush cut": 0.0,
+    "M6 shank passage and central bearing material": 0.0,
+    "Robot bottom mating faces and curved locating surface": 0.0
+  },
+  "added_volume_mm3": 0.0,
+  "camera_box_interference_mm3": 0.0,
+  "cad_valid": true,
+  "cad_solid_count": 1,
+  "camera_arm_nominal_width_mm": 16,
+  "M3_clearance_diameter_mm": 3.4,
+  "M3_spacing_mm": 45,
+  "side_window_corner_radius_mm": 3,
+  "print_time_savings_measured": false,
+  "physical_strength_tested": false,
+  "physical_fit_tested": false,
+  "side_lip_removed": true,
+  "side_lip_depth_removed_mm": 5.2,
+  "side_flush_plane_original_step_x_mm": -20.2,
+  "m6_top_flattened": false,
+  "m6_original_tower_restored": true,
+  "m6_tower_top_original_z_mm": 42.45,
+  "m6_shank_clearance_diameter_mm": 7.0,
+  "m6_shank_outward_wall_mm": 1.3,
+  "m6_bearing_seat_area_before_mm2": 56.54866776461627,
+  "m6_bearing_seat_area_after_mm2": 54.00879255198616,
+  "m6_bearing_seat_area_retained_percent": 95.50851450081488,
+  "m6_bearing_seat_change": "The outermost 0.7-mm cap is trimmed flush along with the side lip; central seat remains.",
+  "stl_watertight": true,
+  "stl_consistent_winding": true,
+  "stl_solid_count": 1,
+  "stl_triangle_count": 43056,
+  "stl_zero_area_or_duplicate_faces_removed": 2,
+  "stl_dimensions_mm": [
+    49.79044723510742,
+    60.0,
+    60.24834442138672
+  ],
+  "stl_translation_from_step_mm": [
+    69.99044799804688,
+    30.0,
+    7.5
+  ],
+  "stl_volume_mm3": 37358.18078749328
+}

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="16" failures="0" disabled="0" errors="0" time="0" timestamp="2026-10-30T11:50:50" name="AllTests">
+  <testsuite name="FrankaHardwareInterfaceTest" tests="13" failures="0" disabled="0" errors="0" time="0" timestamp="2026-10-30T11:50:50">
+    <testcase name="when_on_init_called_expect_success" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_that_the_robot_interfaces_set_when_read_called_return_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_that_the_robot_interfaces_are_set_when_call_export_state_return_zero_values_and_correct_interface_names" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_model_interface_exists" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_that_the_robot_interfaces_are_set_when_call_export_state_interface_robot_state_interface_exists" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_prepare_command_mode_interface_for_stop_effort_interfaces_expect_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_prepare_command_mode_interface_is_called_with_invalid_start_interface_number_expect_throw" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_prepare_command_mode_interface_for_start_effort_interfaces_expect_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_prepare_command_mode_interface_is_called_with_invalid_stop_interface_number_expect_throw" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_on_activate_called_expect_success" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="when_on_deactivate_called_expect_success" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_start_effort_interface_prepared_when_perform_comamnd_mode_switch_called_expect_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+    <testcase name="given_that_effort_control_started_perform_command_mode_switch_stop_expect_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareInterfaceTest" />
+  </testsuite>
+  <testsuite name="FrankaHardwareIntefaceTest" tests="1" failures="0" disabled="0" errors="0" time="0" timestamp="2026-10-30T11:50:50">
+    <testcase name="when_write_called_expect_ok" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwareIntefaceTest" />
+  </testsuite>
+  <testsuite name="FrankaHardwarePosition" tests="2" failures="0" disabled="0" errors="0" time="0" timestamp="2026-10-30T11:50:50">
+    <testcase name="WritesPositionsAndRejectsMixedModes" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwarePosition" />
+    <testcase name="RejectsPartialOrWrongJointSets" status="run" result="completed" time="0" timestamp="2026-10-30T11:50:50" classname="franka_hardware.FrankaHardwarePosition" />
+  </testsuite>
+</testsuites>

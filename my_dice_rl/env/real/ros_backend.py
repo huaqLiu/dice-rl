@@ -18,6 +18,15 @@ def stamp_seconds(stamp):
     return stamp.sec + stamp.nanosec * 1e-9
 
 
+def spin_until_shutdown(executor):
+    """ROS may invalidate the context before a background spin call wakes up."""
+    try:
+        executor.spin()
+    except Exception:
+        if rclpy.ok():
+            raise
+
+
 def decode_image(message):
     channels = {"rgb8": 3, "bgr8": 3, "rgba8": 4, "bgra8": 4}
     if message.encoding not in channels:
@@ -32,13 +41,16 @@ def decode_image(message):
 
 class CollectorNode(Node):
     """Read sensors; GUI can request teleop enable/pause or register a held gear."""
-    def __init__(self, config, buffers):
-        super().__init__("dice_data_collector")
+    def __init__(self, config, buffers, node_name="dice_data_collector"):
+        super().__init__(node_name)
         self.config, self.buffers = config, buffers
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.enable_client = self.create_client(SetBool, config['teleop_enable_service'])
         self.hold_client = self.create_client(Trigger, config['register_hold_service'])
+        self.reset_client = self.create_client(Trigger, config.get('reset_service', '/dice_spacemouse_teleop/reset'))
+        self.recording_lock_client = self.create_client(SetBool,
+            config.get('recording_lock_service', '/dice_spacemouse_teleop/recording_lock'))
         self.control_message = ""
         for key in ("wrist", "external"):
             topic = config[f"{key}_topic"]
@@ -106,11 +118,11 @@ class CollectorNode(Node):
         self.buffers.put("robot", dict(q=q, dq=dq, wrench=wrench), source)
 
     def request_control(self, action):
-        client = self.hold_client if action == 'hold' else self.enable_client
+        client = {'hold': self.hold_client, 'reset': self.reset_client}.get(action, self.enable_client)
         if not client.service_is_ready():
             self.control_message = "遥操作服务未就绪，请先启动 teleop"
             return
-        request = Trigger.Request() if action == 'hold' else SetBool.Request(data=action == 'enable')
+        request = Trigger.Request() if action in ('hold', 'reset') else SetBool.Request(data=action == 'enable')
         future = client.call_async(request)
         self.control_message = "等待遥操作响应……"
         def complete(result):
@@ -120,6 +132,11 @@ class CollectorNode(Node):
             except Exception as exc:
                 self.control_message = str(exc)
         future.add_done_callback(complete)
+
+    def request_recording_lock(self, locked):
+        if not self.recording_lock_client.service_is_ready():
+            raise ValueError('录制互锁服务未就绪，请重启采集程序以加载新版 teleop')
+        return self.recording_lock_client.call_async(SetBool.Request(data=locked))
 
     def teleop(self, m):
         value = json.loads(m.data)

@@ -1,0 +1,17 @@
+# 按用户要求：全部代码完成后统一确认数值。当前仅供模拟验证和离线开发。
+confirmed: false
+# 由操作员在界面标注；不根据末端位姿自动判断插入深度。
+success_definition: 齿轮插入即可，约 15 mm，由人工判定；成功奖励 1，失败奖励 0。
+success_insertion_depth_mm: 15.0
+# 人工判定不要求数值容差；0 表示不要求额外保持时间。
+success_position_tolerance_mm: null
+success_hold_seconds: 0.0
+payload_mass_kg: null
+payload_center_of_mass_m: null
+# 2026-10-30 21:29:04 +08:00 读取的实际 TCP 位姿；基坐标系 panda_link0，末端 panda_hand_tcp。
+# 采集界面仅在按 8 请求复位时读取；每轮策略执行仍通过界面确认实际起始状态。
+reset_base_frame: panda_link0
+reset_ee_frame: panda_hand_tcp
+reset_position_m: [0.5093991413180097, -0.016371339676856965, 0.16452121952955118]
+reset_orientation_xyzw: [0.9994101573379833, -0.020505423768044845, 0.027547471797854522, -0.00004246536057445636]
+notes: 成功判据、奖励和初始 TCP 位姿已确定，其余数值尚待确认。用户计划按 Franka Hand 与 D435i 估算质量，质量数值尚未确定，支架、转接件及夹持齿轮尚未核对；载荷质心待定。此表不修改机器人载荷配置；采集界面可按 8 显式请求直线复位。

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="0" disabled="0" errors="0" time="0.003" timestamp="2026-10-30T11:48:44" name="AllTests">
+  <testsuite name="PositionStep" tests="4" failures="0" disabled="0" errors="0" time="0.003" timestamp="2026-10-30T11:48:44">
+    <testcase name="RestAndSingularJacobianRemainFinite" status="run" result="completed" time="0.001" timestamp="2026-10-30T11:48:44" classname="panda_cartesian_position_controller.PositionStep" />
+    <testcase name="PositionCommandsObeyVelocityAccelerationAndJerkLimits" status="run" result="completed" time="0" timestamp="2026-10-30T11:48:44" classname="panda_cartesian_position_controller.PositionStep" />
+    <testcase name="JointLimitsAndLongPeriodsAreRejected" status="run" result="completed" time="0" timestamp="2026-10-30T11:48:44" classname="panda_cartesian_position_controller.PositionStep" />
+    <testcase name="SmallStationaryTargetConverges" status="run" result="completed" time="0.002" timestamp="2026-10-30T11:48:44" classname="panda_cartesian_position_controller.PositionStep" />
+  </testsuite>
+</testsuites>

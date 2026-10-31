@@ -1,0 +1,9 @@
+# CMake generated Testfile for 
+# Source directory: /home/lhq/dice-rl/my_dice_rl/ros_ws/src/panda_cartesian_position_controller
+# Build directory: /home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller
+# 
+# This file includes the relevant testing commands required for 
+# testing this directory and lists subdirectories to be tested as well.
+add_test(position_step_test "/usr/bin/python3" "-u" "/opt/ros/humble/share/ament_cmake_test/cmake/run_test.py" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/test_results/panda_cartesian_position_controller/position_step_test.gtest.xml" "--package-name" "panda_cartesian_position_controller" "--output-file" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/ament_cmake_gtest/position_step_test.txt" "--command" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/position_step_test" "--gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/test_results/panda_cartesian_position_controller/position_step_test.gtest.xml")
+set_tests_properties(position_step_test PROPERTIES  LABELS "gtest" REQUIRED_FILES "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/position_step_test" TIMEOUT "60" WORKING_DIRECTORY "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller" _BACKTRACE_TRIPLES "/opt/ros/humble/share/ament_cmake_test/cmake/ament_add_test.cmake;125;add_test;/opt/ros/humble/share/ament_cmake_gtest/cmake/ament_add_gtest_test.cmake;86;ament_add_test;/opt/ros/humble/share/ament_cmake_gtest/cmake/ament_add_gtest.cmake;93;ament_add_gtest_test;/home/lhq/dice-rl/my_dice_rl/ros_ws/src/panda_cartesian_position_controller/CMakeLists.txt;86;ament_add_gtest;/home/lhq/dice-rl/my_dice_rl/ros_ws/src/panda_cartesian_position_controller/CMakeLists.txt;0;")
+subdirs("gtest")

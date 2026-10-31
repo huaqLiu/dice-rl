@@ -1,0 +1,11 @@
+{
+  "package_name": "franka_msgs",
+  "non_idl_tuples": [
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:action/Grasp.action",
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:action/Homing.action",
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:action/Move.action",
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:msg/Errors.msg",
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:msg/GraspEpsilon.msg",
+    "/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_msgs:msg/FrankaRobotState.msg"
+  ]
+}

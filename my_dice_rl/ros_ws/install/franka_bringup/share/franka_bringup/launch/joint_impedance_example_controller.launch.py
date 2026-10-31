@@ -1,0 +1,1 @@
+/home/lhq/dice-rl/my_dice_rl/ros_ws/src/franka_ros2-0.1.0/franka_bringup/launch/joint_impedance_example_controller.launch.py

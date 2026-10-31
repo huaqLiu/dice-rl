@@ -99,7 +99,10 @@ controller_interface::CallbackReturn FrankaRobotStateBroadcaster::on_deactivate(
 controller_interface::return_type FrankaRobotStateBroadcaster::update(
     const rclcpp::Time& time,
     const rclcpp::Duration& /*period*/) {
-  if (realtime_franka_state_publisher && realtime_franka_state_publisher->trylock()) {
+  if (!realtime_franka_state_publisher) {
+    return controller_interface::return_type::ERROR;
+  }
+  if (realtime_franka_state_publisher->trylock()) {
     realtime_franka_state_publisher->msg_.header.stamp = time;
 
     if (!franka_robot_state->get_values_as_message(realtime_franka_state_publisher->msg_)) {
@@ -112,7 +115,8 @@ controller_interface::return_type FrankaRobotStateBroadcaster::update(
     return controller_interface::return_type::OK;
 
   } else {
-    return controller_interface::return_type::ERROR;
+    // The publishing thread is busy. Skip this sample without blocking the control loop.
+    return controller_interface::return_type::OK;
   }
 }
 

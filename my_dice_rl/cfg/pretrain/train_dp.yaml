@@ -1,0 +1,32 @@
+task_config: ../task/gear_insertion.yaml
+
+model:
+  down_dims: [256, 512, 1024]
+  time_embed_dim: 256
+  train_diffusion_steps: 50
+  inference_steps: 16
+  pretrained_vision: false
+  image_size: 224
+
+training:
+  device: cuda:0
+  seed: 42
+  epochs: 100
+  batch_size: 8
+  num_workers: 4
+  torch_threads: 2
+  checkpoint_every: 500
+  device_lock: log_dir/rl/device.lock
+  learning_rate: 0.0001
+  weight_decay: 0.000001
+  warmup_steps: 500
+  min_lr_ratio: 0.01
+  grad_clip_norm: 1.0
+  use_amp: true
+  ema_decay: 0.995
+  output_root: log_dir/pretrain/gear_dp
+  # Per-epoch limits are useful for checks; null means the full dataset.
+  max_train_steps: null
+  max_val_steps: null
+  # Stop after this many optimizer steps and save a resumable checkpoint.
+  max_total_steps: null

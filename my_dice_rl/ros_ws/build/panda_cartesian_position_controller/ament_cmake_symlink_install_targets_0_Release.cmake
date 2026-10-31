@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/libpanda_cartesian_position_controller.so" "TARGETS" "panda_cartesian_position_controller" "DESTINATION" "lib")

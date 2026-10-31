@@ -1,0 +1,4 @@
+schema: dice_franka_command_interfaces_v1
+supported_commands: [effort, position]
+position_transport: libfranka_JointPositions
+exclusive_modes: true

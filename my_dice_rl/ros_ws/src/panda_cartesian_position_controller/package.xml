@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>panda_cartesian_position_controller</name>
+  <version>0.0.1</version>
+  <description>Cartesian joint-position controller for Franka Panda on ROS2.</description>
+
+  <maintainer email="lhq@example.com">lhq</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>realtime_tools</depend>
+  <depend>geometry_msgs</depend>
+  <depend>orocos_kdl</depend>
+  <depend>kdl_parser</depend>
+  <depend>urdf</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <depend>eigen</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

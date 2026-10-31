@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite
+  name="franka_hardware.clang_format"
+  tests="5"
+  errors="0"
+  failures="0"
+  time="0.046"
+>
+  <testcase
+    name="include/franka_hardware/franka_hardware_interface.hpp"
+    classname="franka_hardware.clang_format"/>
+  <testcase
+    name="include/franka_hardware/model.hpp"
+    classname="franka_hardware.clang_format"/>
+  <testcase
+    name="include/franka_hardware/robot.hpp"
+    classname="franka_hardware.clang_format"/>
+  <testcase
+    name="src/franka_hardware_interface.cpp"
+    classname="franka_hardware.clang_format"/>
+  <testcase
+    name="src/robot.cpp"
+    classname="franka_hardware.clang_format"/>
+  <system-out>Checked files:
+* include/franka_hardware/franka_hardware_interface.hpp
+* include/franka_hardware/model.hpp
+* include/franka_hardware/robot.hpp
+* src/franka_hardware_interface.cpp
+* src/robot.cpp</system-out>
+</testsuite>

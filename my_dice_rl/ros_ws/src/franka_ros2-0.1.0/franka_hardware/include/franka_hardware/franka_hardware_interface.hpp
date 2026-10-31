@@ -58,6 +58,7 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
  private:
   std::unique_ptr<Robot> robot_;
   std::array<double, kNumberOfJoints> hw_commands_{0, 0, 0, 0, 0, 0, 0};
+  std::array<double, kNumberOfJoints> hw_position_commands_{};
   std::array<double, kNumberOfJoints> hw_positions_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_velocities_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_efforts_{0, 0, 0, 0, 0, 0, 0};
@@ -67,6 +68,8 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
 
   bool effort_interface_claimed_ = false;
   bool effort_interface_running_ = false;
+  bool position_interface_claimed_ = false;
+  bool position_interface_running_ = false;
   static rclcpp::Logger getLogger();
 
   const std::string k_robot_name{"panda"};

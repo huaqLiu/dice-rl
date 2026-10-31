@@ -41,6 +41,11 @@ void Robot::write(const std::array<double, 7>& efforts) {
   tau_command_ = efforts;
 }
 
+void Robot::writePosition(const std::array<double, 7>& positions) {
+  std::lock_guard<std::mutex> lock(write_mutex_);
+  position_command_ = positions;
+}
+
 franka::RobotState Robot::read() {
   std::lock_guard<std::mutex> lock(read_mutex_);
   return {current_state_};
@@ -77,6 +82,39 @@ void Robot::initializeTorqueControl() {
         true, franka::kMaxCutoffFrequency);
   };
   control_thread_ = std::make_unique<std::thread>(kTorqueControl);
+}
+
+void Robot::initializeJointPositionControl() {
+  assert(isStopped());
+  stopped_ = false;
+  control_error_ = false;
+  control_thread_ = std::make_unique<std::thread>([this]() {
+    try {
+      bool first = true;
+      robot_->control(
+          [this, &first](const franka::RobotState& state, const franka::Duration&) {
+            {
+              std::lock_guard<std::mutex> lock(read_mutex_);
+              current_state_ = state;
+            }
+            std::lock_guard<std::mutex> lock(write_mutex_);
+            // The first FCI position must equal its last desired joint position.
+            // Subsequent commands use libfranka's velocity/acceleration/jerk limiting.
+            if (first) {
+              position_command_ = state.q_d;
+              first = false;
+            }
+            franka::JointPositions out(position_command_);
+            out.motion_finished = finish_;
+            return out;
+          },
+          franka::ControllerMode::kJointImpedance, true, franka::kDefaultCutoffFrequency);
+    } catch (const std::exception& error) {
+      control_error_ = true;
+      RCLCPP_ERROR(rclcpp::get_logger("FrankaHardwareInterface"), "FCI position loop stopped: %s",
+                   error.what());
+    }
+  });
 }
 
 void Robot::initializeContinuousReading() {

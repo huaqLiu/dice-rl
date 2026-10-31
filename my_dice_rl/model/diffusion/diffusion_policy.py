@@ -92,6 +92,14 @@ class DiffusionPolicy(nn.Module):
         init_noise 允许后续 DICE-RL 对同一噪声 z 生成相同基础动作。
         """
         condition = self.encode_obs(obs)
+        return self.predict_action_from_features(condition, init_noise, generator)
+
+    @torch.no_grad()
+    def predict_action_from_features(self, condition, init_noise=None, generator=None):
+        """从冻结的视觉/状态特征采样，供 RL 复用；动作仍使用物理单位。"""
+        expected = self.obs_encoder.feature_dim * self.obs_steps
+        if condition.ndim != 2 or condition.shape[1] != expected:
+            raise ValueError(f"Expected encoded observation (B, {expected})")
         shape = (condition.shape[0], self.horizon_steps, self.action_dim)
         if init_noise is None:
             sample = torch.randn(shape, device=condition.device, dtype=condition.dtype,

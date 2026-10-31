@@ -1,0 +1,25 @@
+-- run_test.py: invoking following command in '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller':
+ - /home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/position_step_test --gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/test_results/panda_cartesian_position_controller/position_step_test.gtest.xml
+
+Running main() from /opt/ros/humble/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from PositionStep
+[ RUN      ] PositionStep.RestAndSingularJacobianRemainFinite
+[       OK ] PositionStep.RestAndSingularJacobianRemainFinite (1 ms)
+[ RUN      ] PositionStep.PositionCommandsObeyVelocityAccelerationAndJerkLimits
+[       OK ] PositionStep.PositionCommandsObeyVelocityAccelerationAndJerkLimits (0 ms)
+[ RUN      ] PositionStep.JointLimitsAndLongPeriodsAreRejected
+[       OK ] PositionStep.JointLimitsAndLongPeriodsAreRejected (0 ms)
+[ RUN      ] PositionStep.SmallStationaryTargetConverges
+[       OK ] PositionStep.SmallStationaryTargetConverges (2 ms)
+[----------] 4 tests from PositionStep (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (3 ms total)
+[  PASSED  ] 4 tests.
+
+
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/test_results/panda_cartesian_position_controller/position_step_test.gtest.xml'
+-- run_test.py: verify result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_cartesian_position_controller/test_results/panda_cartesian_position_controller/position_step_test.gtest.xml'
