@@ -4,7 +4,8 @@ import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (qos_profile_sensor_data, QoSProfile, ReliabilityPolicy,
+                       DurabilityPolicy)
 from rclpy.time import Time
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CameraInfo, Image, JointState
@@ -52,10 +53,15 @@ class CollectorNode(Node):
         self.recording_lock_client = self.create_client(SetBool,
             config.get('recording_lock_service', '/dice_spacemouse_teleop/recording_lock'))
         self.control_message = ""
+        # Both local RGB drivers offer RELIABLE delivery. BEST_EFFORT lost
+        # complete large RGB messages in live comparisons; keep only the latest
+        # frame to bound the pending image queue; source-age checks still apply.
+        image_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                               durability=DurabilityPolicy.VOLATILE)
         for key in ("wrist", "external"):
             topic = config[f"{key}_topic"]
             self.create_subscription(Image, topic,
-                lambda m, k=key: self.guarded(k, self.image, m, k), qos_profile_sensor_data)
+                lambda m, k=key: self.guarded(k, self.image, m, k), image_qos)
             self.create_subscription(CameraInfo, topic.rsplit("/", 1)[0] + "/camera_info",
                 lambda m, k=key: self.camera_info(m, k), qos_profile_sensor_data)
         self.create_subscription(PoseStamped, config["target_topic"],
@@ -132,6 +138,7 @@ class CollectorNode(Node):
             except Exception as exc:
                 self.control_message = str(exc)
         future.add_done_callback(complete)
+        return future
 
     def request_recording_lock(self, locked):
         if not self.recording_lock_client.service_is_ready():

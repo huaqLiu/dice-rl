@@ -28,6 +28,19 @@ class DemoBackend:
         self.gripper_busy, self.active = False, False
         self.command_error, self.has_lock = '', False
         self.commands = []
+        self.manual_enabled = False
+        self.control_message = ''
+        self.manual_actions = []
+
+    def request_control(self, action):
+        from concurrent.futures import Future
+        from types import SimpleNamespace
+        future = Future()
+        self.manual_actions.append(action)
+        self.manual_enabled = action == 'enable'
+        self.control_message = '模拟模式：'+dict(enable='遥操作已启用', pause='已暂停', reset='已接收复位请求')[action]
+        future.set_result(SimpleNamespace(success=True, message=self.control_message))
+        return future
 
     def check_ready(self, require_lock=True):
         if self.command_error:
@@ -38,6 +51,7 @@ class DemoBackend:
 
     def acquired(self):
         self.has_lock = True
+        self.manual_enabled = False
 
     def activate(self):
         self.active = True

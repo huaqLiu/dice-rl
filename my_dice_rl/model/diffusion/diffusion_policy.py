@@ -110,9 +110,13 @@ class DiffusionPolicy(nn.Module):
             sample = init_noise.to(condition).clone()
         # 每次采样创建独立 scheduler，避免推理步数等可变状态互相影响。
         scheduler = type(self.noise_scheduler).from_config(self.noise_scheduler.config)
-        scheduler.set_timesteps(self.inference_steps, device=condition.device)
-        for timestep in scheduler.timesteps:
-            predicted_noise = self.network(sample, timestep, condition)
+        # DDIM indexes CPU alpha tables and branches on the scalar timestep.
+        # Keep those indices on CPU to avoid repeated CUDA scalar readbacks;
+        # transfer all network timesteps once for the denoising network.
+        scheduler.set_timesteps(self.inference_steps)
+        network_timesteps = scheduler.timesteps.to(condition.device)
+        for timestep, network_timestep in zip(scheduler.timesteps, network_timesteps):
+            predicted_noise = self.network(sample, network_timestep, condition)
             sample = scheduler.step(predicted_noise, timestep, sample, eta=0.,
                                     generator=generator).prev_sample
         prediction = self.action_normalizer.unnormalize(sample.clamp(-1, 1))

@@ -52,13 +52,14 @@ class RolloutWriter:
             values['receive/'+key] = np.float64(frame[key].received)
         self.put('observations', values, {key: policy_image(frame[key].value) for key in ('wrist', 'external')})
 
-    def finish(self, outcome, reason, notes='', unsafe=False):
+    def finish(self, outcome, reason, notes='', unsafe=False, diagnostics=None):
         if self.closing:
             return
         self.closing = True
         # Only a small sentinel is added here; disk I/O never blocks the control timer.
         try:
-            self.queue.put_nowait(('finish', dict(outcome=outcome, reason=reason, notes=notes, unsafe=unsafe), None))
+            self.queue.put_nowait(('finish', dict(outcome=outcome, reason=reason, notes=notes,
+                                                 unsafe=unsafe, diagnostics=diagnostics), None))
         except queue.Full:
             self.error = '写盘队列已满，保留 partial 文件'
 
@@ -124,6 +125,9 @@ class RolloutWriter:
             self.closed = True
 
     def _finalize(self, file, counts, label):
+        diagnostics = label.pop('diagnostics', None)
+        if diagnostics is not None:
+            self.meta['stop_diagnostics'] = diagnostics
         count = max(0, counts.get('observations', 0)-1)
         eligible = label['outcome'] in ('success', 'failed') and not label['unsafe'] and count > 0
         outcome = label['outcome'] if eligible or label['outcome'] == 'aborted' else 'invalid'

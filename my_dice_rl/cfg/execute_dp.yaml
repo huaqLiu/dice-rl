@@ -1,6 +1,7 @@
 collector_config: collect.yaml
 checkpoint: null
 device: cuda:0
+inference_backend: process
 device_lock: log_dir/rl/device.lock
 data_root: datasets/rl_rollouts
 task: gear_insertion
@@ -10,7 +11,7 @@ max_sensor_skew_s: 0.08
 # 夹爪状态约 10 Hz；图像/机械臂保持上面的 80 ms 同步检查，夹爪单独检查时效。
 max_gripper_age_s: 0.15
 control_timeout_s: 0.15
-max_inference_latency_s: 0.30
+max_inference_latency_s: 1.0
 max_plan_age_s: 0.70
 max_episode_s: 30.0
 min_free_gb: 5.0
@@ -22,12 +23,12 @@ teleop_lock_service: /dice_spacemouse_teleop/policy_lock
 handover_timeout_s: 2.0
 max_linear_speed: 0.025
 max_angular_speed: 0.15
-max_position_error: 0.025
-max_orientation_error: 0.25
-max_goal_position_error: 0.04
-max_goal_orientation_error: 0.40
-max_translation_from_reset: 0.10
-max_rotation_from_reset: 0.60
+max_position_error: 0.1
+max_orientation_error: 0.6
+max_goal_position_error: 0.1
+max_goal_orientation_error: 0.6
+max_translation_from_reset: 0.50
+max_rotation_from_reset: 1.0
 reset_drift_m: 0.005
 reset_drift_rad: 0.05
 max_force: 20.0

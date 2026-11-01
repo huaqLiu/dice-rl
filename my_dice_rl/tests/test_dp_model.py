@@ -63,6 +63,30 @@ def test_sampling_uses_ten_dimensions_and_checkpoint_keeps_normalizers(example):
     torch.testing.assert_close(first['action_pred'], second['action_pred'])
 
 
+def test_ddim_cpu_indices_preserve_fixed_noise_actions(example, monkeypatch):
+    model, batch = example
+    model.eval()
+    with torch.no_grad():
+        features = model.encode_obs(batch['obs'])
+        noise = torch.randn(1, model.horizon_steps, model.action_dim)
+        scheduler = type(model.noise_scheduler).from_config(model.noise_scheduler.config)
+        scheduler.set_timesteps(model.inference_steps, device=features.device)
+        sample = noise.clone()
+        for timestep in scheduler.timesteps:
+            epsilon = model.network(sample, timestep, features)
+            sample = scheduler.step(epsilon, timestep, sample, eta=0.).prev_sample
+        expected = model.action_normalizer.unnormalize(sample.clamp(-1, 1))
+        expected = torch.cat([expected[..., :9], expected[..., 9:].clamp(0., .08)], dim=-1)
+        scheduler_type = type(model.noise_scheduler)
+        original_set_timesteps = scheduler_type.set_timesteps
+        def cpu_schedule(self, steps, device=None):
+            assert device is None, 'Scheduler scalar indices must stay on CPU'
+            return original_set_timesteps(self, steps, device=device)
+        monkeypatch.setattr(scheduler_type, 'set_timesteps', cpu_schedule)
+        actual = model.predict_action_from_features(features, init_noise=noise)['action_pred']
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
 def test_normalizer_requires_training_statistics_and_preserves_constant_actions():
     normalizer = FeatureNormalizer(2)
     with pytest.raises(RuntimeError, match="Fit normalizers"):

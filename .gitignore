@@ -23,7 +23,7 @@ venv/
 
 # Generated data and training output
 datasets/
-checkpoints/
-log_dir/
+# checkpoints/
+# log_dir/
 wandb/
 *.log

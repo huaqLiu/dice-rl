@@ -41,7 +41,9 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
     collector.update(wrist_topic='/policy_test/wrist/image_raw', external_topic='/policy_test/external/image_raw',
         target_topic='/policy_test/target', robot_state_topic='/policy_test/state',
         gripper_topic='/policy_test/gripper/joint_states',
-        teleop_topic='/policy_test/dice_spacemouse_teleop/recording_state')
+        teleop_topic='/policy_test/dice_spacemouse_teleop/recording_state',
+        teleop_enable_service='/policy_test/dice_spacemouse_teleop/enable',
+        reset_service='/policy_test/dice_spacemouse_teleop/reset')
     buffer = ObservationBuffer()
     teleop = FrankaSpaceMouseTeleop()
     backend = PolicyROSNode(collector, config, buffer)
@@ -160,6 +162,15 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
         spin_until(lambda: not teleop._policy_locked)
         assert engine.writer.meta['eligible_for_rl']
         assert engine.writer.meta['outcome'] == 'failed'
+        spin_until(lambda: engine.status()['manual']['can_enable'])
+        engine.submit('manual_enable')
+        spin_until(lambda: teleop.enabled and not engine.status()['manual']['busy'])
+        engine.submit('stop')
+        spin_until(lambda: not teleop.enabled and not engine.status()['manual']['busy'])
+        engine.submit('manual_reset')
+        spin_until(lambda: teleop._reset_plan is not None)
+        engine.submit('stop')
+        spin_until(lambda: teleop._reset_plan is None and not engine.status()['manual']['busy'])
     finally:
         engine.submit('close')
         try:

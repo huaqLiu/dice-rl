@@ -26,6 +26,9 @@ def load_config(path):
     collector_path = (path.parent/config.pop('collector_config')).resolve()
     collector = yaml.safe_load(collector_path.read_text())
     config['data_root'] = str(project_path(config['data_root']))
+    config.setdefault('inference_backend', 'process')
+    if config['inference_backend'] not in ('process', 'thread'):
+        raise ValueError('inference_backend must be process or thread')
     for key in ('device_lock', 'deployment_review'):
         if config.get(key):
             config[key] = str(project_path(config[key]))
@@ -74,7 +77,7 @@ class RLWindow(QtWidgets.QMainWindow):
         title = QtWidgets.QLabel('Panda / DP 与 RL 策略执行 · 人工复位 · 奖励标注')
         title.setObjectName('title')
         layout.addWidget(title)
-        layout.addWidget(QtWidgets.QLabel('每轮：人工复位 → 确认就绪 → 开始 → 停止 → 成功/失败标注'))
+        layout.addWidget(QtWidgets.QLabel('每轮：人工复位 → 3 就绪 → 4 执行；插入完成后立即 2 停止 → 5 保存成功（奖励 1）'))
         model_row = QtWidgets.QHBoxLayout()
         self.checkpoint = QtWidgets.QLineEdit()
         self.checkpoint.setPlaceholderText('正式 DP .pt、RL 部署包 .pt 或 latest_policy.json；模拟模式可用演示策略')
@@ -101,6 +104,23 @@ class RLWindow(QtWidgets.QMainWindow):
         self.status.setWordWrap(True)
         layout.addWidget(self.health)
         layout.addWidget(self.robot)
+        manual_row = QtWidgets.QHBoxLayout()
+        self.manual_enable = QtWidgets.QPushButton('启用 SpaceMouse 遥操作 1')
+        self.reset = QtWidgets.QPushButton('回到初始位姿 8')
+        for button, key, operation in ((self.manual_enable, '1', 'manual_enable'),
+                                       (self.reset, '8', 'manual_reset')):
+            bind_button_keys(self, button, key)
+            button.clicked.connect(lambda checked=False, action=operation: self.manual_control(action))
+            manual_row.addWidget(button)
+        self.manual_state = QtWidgets.QLabel()
+        self.manual_state.setWordWrap(True)
+        self.manual_state.setMinimumWidth(240)
+        manual_row.addWidget(self.manual_state, 1)
+        layout.addLayout(manual_row)
+        hint = QtWidgets.QLabel('1 启用遥操作，8 直线回初始位姿，2 / 0 / Esc 暂停。'
+                              '先保存标注、退出轴并确认路径；复位不改变夹爪。')
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.confirmation = QtWidgets.QCheckBox('我已完成本轮人工复位：齿轮夹稳、工装就位、机械臂处于起始区域')
         layout.addWidget(self.confirmation)
         controls = QtWidgets.QHBoxLayout()
@@ -112,7 +132,7 @@ class RLWindow(QtWidgets.QMainWindow):
         bind_button_keys(self, self.start, '4')
         self.start.clicked.connect(lambda: self.engine.submit('start', notes=self.notes.text()))
         controls.addWidget(self.start)
-        self.stop = QtWidgets.QPushButton('停止 / 取消就绪 2 / 0 / Esc')
+        self.stop = QtWidgets.QPushButton('停止策略 / 暂停遥操 / 停止复位 2 / 0 / Esc')
         bind_button_keys(self, self.stop, '2', '0', 'Esc')
         self.stop.setStyleSheet('background:#9f1239;')
         self.stop.clicked.connect(lambda: self.engine.submit('stop'))
@@ -138,9 +158,9 @@ class RLWindow(QtWidgets.QMainWindow):
         self.path.setWordWrap(True)
         self.path.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         layout.addWidget(self.path)
-        layout.addWidget(QtWidgets.QLabel('停止为软件停止；程序不会自动复位。仅标注停止前已实际完成的结果。'))
+        layout.addWidget(QtWidgets.QLabel('停止为软件停止；复位仅由按 8 显式请求。仅标注停止前已实际完成的结果。'))
         self.history = QtWidgets.QListWidget()
-        self.history.setMaximumHeight(120)
+        self.history.setMaximumHeight(100)
         self.history.itemDoubleClicked.connect(self.open_episode)
         layout.addWidget(self.history)
         self.last_state = None
@@ -156,9 +176,14 @@ class RLWindow(QtWidgets.QMainWindow):
             self.checkpoint.setText(path)
             self.engine.submit('load', path=path)
 
+    def manual_control(self, operation):
+        self.confirmation.setChecked(False)
+        self.engine.submit(operation)
+
     def refresh(self):
         status = self.engine.status()
         state, now = status['state'], time.monotonic()
+        manual = status.get('manual', {})
         for key, preview in self.previews.items():
             sample = self.buffer.latest(key)
             if sample is not None:
@@ -175,11 +200,18 @@ class RLWindow(QtWidgets.QMainWindow):
             force = np.linalg.norm(robot.value['wrench'][:3])
             self.robot.setText(f'末端 XYZ / m：{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}  '
                                f'夹爪：{grip.value*1000:.1f}mm  外力：{force:.1f}N')
-        self.ready.setEnabled(state == 'RESET' and bool(status['model']) and not status['busy'])
-        self.start.setEnabled(state == 'READY')
-        self.stop.setEnabled(state in ('LOCKING', 'READY', 'RUNNING'))
-        self.browse.setEnabled(state == 'RESET' and not status['busy'])
-        self.confirmation.setEnabled(state == 'RESET')
+        manual_busy = manual.get('busy', False) or manual.get('resetting', False)
+        self.manual_enable.setEnabled(manual.get('can_enable', False) and not manual.get('enabled', False) and not self.closing)
+        self.reset.setEnabled(manual.get('can_reset', False) and not self.closing)
+        self.manual_state.setText(('正在复位' if manual.get('resetting') else
+            'SpaceMouse 遥操作已启用' if manual.get('enabled') else
+            'SpaceMouse 已暂停' if manual.get('available') else '等待遥操作节点')+
+            ' · '+manual.get('message', ''))
+        self.ready.setEnabled(state == 'RESET' and bool(status['model']) and not status['busy'] and not manual_busy and not self.closing)
+        self.start.setEnabled(state == 'READY' and not self.closing)
+        self.stop.setEnabled(state in ('LOCKING', 'READY', 'RUNNING') or manual.get('can_pause', False))
+        self.browse.setEnabled(state == 'RESET' and not status['busy'] and not self.closing)
+        self.confirmation.setEnabled(state == 'RESET' and not manual_busy and not self.closing)
         for button in self.label_buttons:
             button.setEnabled(state == 'LABEL' and status['frames'] >= 2)
         if state == 'RESET' and self.last_state not in (None, 'RESET'):
@@ -187,6 +219,11 @@ class RLWindow(QtWidgets.QMainWindow):
             self.refresh_history()
         self.last_state = state
         self.status.setText(f'{self.names[state]} · {status["frames"]} 帧\n{status["message"]}')
+        timing = status.get('inference_timing', {})
+        if timing:
+            self.status.setText(self.status.text()+f'\n推理进程：计算 {timing["compute_ms"]:.0f} ms · '
+                f'传入 {timing["queue_ms"]:.0f} ms · 返回 {timing["return_ms"]:.0f} ms · '
+                f'接收调度 {timing.get("poll_ms", 0):.0f} ms')
         self.path.setText('轨迹：'+status['path'])
         if status['model'] and not self.checkpoint.text():
             self.checkpoint.setText(status['model'])

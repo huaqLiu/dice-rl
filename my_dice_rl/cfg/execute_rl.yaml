@@ -2,6 +2,7 @@
 collector_config: collect.yaml
 checkpoint: null
 device: cuda:0
+inference_backend: process
 data_root: datasets/rl_rollouts
 task: gear_insertion
 control_hz: 50.0

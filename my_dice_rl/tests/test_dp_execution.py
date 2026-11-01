@@ -8,7 +8,7 @@ import pytest
 from my_dice_rl.agent.eval.dp_executor import DPExecutor
 from my_dice_rl.agent.eval.dp_policy import DemoPolicy
 from my_dice_rl.agent.eval.command_limits import limit_command
-from my_dice_rl.env.real.policy_observation import ObservationBuffer
+from my_dice_rl.env.real.policy_observation import ObservationBuffer, ObservationSyncError
 from my_dice_rl.env.real.policy_demo import DemoBackend
 from my_dice_rl.script.rl_collect_gui import load_config
 from my_dice_rl.util.config import PROJECT_ROOT
@@ -89,6 +89,49 @@ def test_slow_gripper_channel_has_independent_age_without_relaxing_fast_alignmen
     buffer.put('wrist', np.zeros((224,224,3), np.uint8), 1., 9.85)
     with pytest.raises(ValueError, match='时间差'):
         buffer.snapshot(10., .2, .08, max_gripper_age=.15)
+
+
+def test_rejected_snapshot_keeps_channel_timing_and_historical_query():
+    buffer = ObservationBuffer()
+    backend = DemoBackend(buffer)
+    fill(buffer, backend, 10.)
+    buffer.buffers['wrist'].clear()
+    buffer.put('wrist', np.zeros((224, 224, 3), np.uint8), 1700000009.92, 9.92)
+    buffer.buffers['external'].clear()
+    buffer.put('external', np.zeros((224, 224, 3), np.uint8), 1700000009.91, 9.91)
+    # There is a newer image, but it is in the future relative to this query.
+    buffer.put('external', np.zeros((224, 224, 3), np.uint8), 1700000010.01, 10.01)
+    with pytest.raises(ObservationSyncError, match='external.*90.0 ms') as caught:
+        buffer.snapshot(10., .2, .08, max_gripper_age=.15)
+    details = caught.value.diagnostics
+    assert details['query_tick'] == 10.
+    assert details['skew_ms'] == pytest.approx(90.)
+    assert details['channels']['external']['age_ms'] == pytest.approx(90.)
+    assert details['channels']['external']['latest_age_ms'] == pytest.approx(-10.)
+    assert details['channels']['external']['causal'] == 1
+    assert details['channels']['external']['buffered'] == 2
+    assert details['max_skew_s'] == .08
+    json.dumps(details, allow_nan=False)
+
+
+def test_sync_failure_is_saved_with_original_protection(runtime, monkeypatch):
+    engine, buffer, backend = runtime
+    engine.submit('ready', held_confirmed=True)
+    pump(engine, buffer, backend, .5, until=lambda: engine.state == 'READY')
+    engine.submit('start')
+    pump(engine, buffer, backend, .4, until=lambda: engine.state == 'RUNNING' and engine.plan_id >= 0)
+    details = dict(query_tick=time.monotonic(), max_skew_s=.08,
+                   skew_ms=95., oldest='wrist', newest='robot')
+
+    def rejected(now):
+        raise ObservationSyncError('图像与机器人状态时间差超限：95 ms', details)
+
+    monkeypatch.setattr(engine, 'snapshot', rejected)
+    pump(engine, buffer, backend, 2., until=lambda: engine.state == 'RESET')
+    meta = json.loads((engine.last_path/'metadata.json').read_text())
+    assert meta['stop_diagnostics'] == details
+    assert meta['status'] == 'aborted' and not meta['eligible_for_rl']
+    assert meta['label']['unsafe']
 
 
 def test_rotation_decode_and_cartesian_speed_limit(runtime):
