@@ -22,7 +22,8 @@ class CheckpointPolicy:
         self._configure(task, state['model_config'], device, collector, real)
         self.identity = dict(path=self.path, dataset_id=state['dataset_id'],
                              global_step=state['global_step'], weights='ema',
-                             task=task, model_config=state['model_config'])
+                             task=task, model_config={**state['model_config'], 'action_dim': self.action_dim,
+                                                      'state_dim': self.model.state_normalizer.feature_dim})
         with Path(self.path).open('rb') as stream:
             self.identity['sha256'] = hashlib.file_digest(stream, 'sha256').hexdigest() if hasattr(hashlib, 'file_digest') else self._hash_stream(stream)
         self._warmup()
@@ -47,6 +48,7 @@ class CheckpointPolicy:
         self.obs_steps = self.model.obs_steps
         self.horizon = self.model.horizon_steps
         self.act_steps = self.model.act_steps
+        self.action_dim = self.model.action_normalizer.feature_dim
         self.image_size = model_config['image_size']
         self.device = torch.device(device)
 
@@ -56,7 +58,8 @@ class CheckpointPolicy:
         obs = {key: torch.zeros(1, self.obs_steps, 3, self.image_size, self.image_size,
                                 device=self.device) for key in ('camera_wrist', 'camera_external')}
         obs['robot_eef_pose'] = center[:9].expand(1, self.obs_steps, 9)
-        obs['gripper_width'] = center[9:].expand(1, self.obs_steps, 1)
+        if center.numel() == 10:
+            obs['gripper_width'] = center[9:].expand(1, self.obs_steps, 1)
         with torch.inference_mode():
             self.model.predict_action(obs)
         if self.device.type == 'cuda':
@@ -74,10 +77,11 @@ class CheckpointPolicy:
             rgb = np.stack(images).transpose(0, 3, 1, 2).copy()
             obs[key] = torch.from_numpy(rgb).unsqueeze(0).to(self.device).float() / 255.
         pose = pose7_to_pose9(np.stack([frame['eef'].value for frame in history]))
-        width = np.array([[frame['gripper'].value] for frame in history], dtype=np.float32)
         obs['robot_eef_pose'] = torch.from_numpy(pose).unsqueeze(0).to(self.device)
-        obs['gripper_width'] = torch.from_numpy(width).unsqueeze(0).to(self.device)
-        noise = torch.randn(1, self.horizon, 10, device=self.device)
+        if self.model.state_normalizer.feature_dim == 10:
+            width = np.array([[frame['gripper'].value] for frame in history], dtype=np.float32)
+            obs['gripper_width'] = torch.from_numpy(width).unsqueeze(0).to(self.device)
+        noise = torch.randn(1, self.horizon, self.action_dim, device=self.device)
         with torch.inference_mode():
             prediction = self.model.predict_action(obs, init_noise=noise)['action_pred'][0].cpu().numpy()
         return prediction, noise[0].cpu().numpy()
@@ -85,12 +89,13 @@ class CheckpointPolicy:
 
 class DemoPolicy:
     obs_steps, dt, horizon, act_steps = 2, .1, 20, 4
+    action_dim = 9
     path = 'SIMULATED_POLICY'
-    identity = dict(path=path, weights='synthetic', simulated=True)
+    identity = dict(path=path, weights='synthetic', simulated=True, model_config=dict(action_dim=9))
 
     def predict(self, history):
         pose = pose7_to_pose9(np.asarray(history[-1]['eef'].value))
-        action = np.r_[pose, 0.].astype(np.float32)
+        action = pose.astype(np.float32)
         actions = np.repeat(action[None], self.horizon, axis=0)
         actions[:, 2] -= np.linspace(0, .004, self.horizon)
         return actions, np.zeros_like(actions)

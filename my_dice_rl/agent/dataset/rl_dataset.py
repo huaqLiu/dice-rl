@@ -43,7 +43,7 @@ class RLDataset(Dataset):
     时间戳及 dt 保留真实记录值，不把 50 Hz 指令重解释成 10 Hz 策略动作。
     后续回放模块仍需按策略决策组织动作块，本类不计算折扣回报或拟合归一化。
 
-    sample['action']: (M, 10)，XYZ + rotation6d（前两行）+ 已接受的夹爪目标。
+    sample['action']: (M, 9)，XYZ + rotation6d（旧10维记录额外保留夹爪目标）。
     sample['commands']: 每条指令的时间、持续时长、计划编号、原预测动作与夹爪模式。
     若区间开始时已有指令在保持，序列首项带入该指令，is_new=False。
     uncovered_dt 表示第一条已知指令之前的时间；没有凭空补造初始动作。
@@ -131,19 +131,31 @@ class RLDataset(Dataset):
             raise ValueError('Actual gripper width outside [0, .085] m')
         for key, tail in [('joint_position', 7), ('joint_velocity', 7), ('wrench', 6)]:
             _array(file, 'observations/' + key, (count, tail))
-        received = []
+        received = {}
         config = metadata['config']
         max_age, max_skew = config['max_age_s'], config['max_sensor_skew_s']
         if not np.isfinite([max_age, max_skew]).all() or min(max_age, max_skew) <= 0:
             raise ValueError('Invalid recorded synchronization limits')
+        max_gripper_age = config.get('max_gripper_age_s')
+        if max_gripper_age is not None and (isinstance(max_gripper_age, bool)
+                or not isinstance(max_gripper_age, (int, float))
+                or not np.isfinite(max_gripper_age) or max_gripper_age <= 0):
+            raise ValueError('Invalid recorded gripper age limit')
         for key in ('wrist', 'external', 'eef', 'gripper', 'robot'):
             receive = _array(file, 'observations/receive/' + key, (count,))
             _array(file, 'observations/source/' + key, (count,))
             if np.any(tick - receive < -1e-6) or np.any(tick - receive > max_age + 1e-6):
                 raise ValueError(f'Stale or noncausal observation: {key}')
-            received.append(receive)
-        if np.any(np.ptp(received, axis=0) > max_skew + 1e-6):
+            received[key] = receive
+        # Match ObservationBuffer: slow Hand state has its own recorded age
+        # budget; images/arm/TF retain the full fast-stream skew check. Files
+        # without that budget keep the legacy all-stream alignment requirement.
+        synchronized = [value for key, value in received.items()
+                        if max_gripper_age is None or key != 'gripper']
+        if np.any(np.ptp(synchronized, axis=0) > max_skew + 1e-6):
             raise ValueError('Observation receive-time skew exceeds recorded limit')
+        if max_gripper_age is not None and np.any(tick-received['gripper'] > max_gripper_age + 1e-6):
+            raise ValueError('Stale gripper observation exceeds recorded age limit')
         for camera in ('wrist', 'external'):
             if file['observations/rgb/' + camera].shape != (count, 1):
                 raise ValueError(f'Missing/inconsistent observation RGB: {camera}')
@@ -157,14 +169,18 @@ class RLDataset(Dataset):
             if metadata.get('counts', {}).get(group, 0) != expected:
                 raise ValueError(f'Metadata count disagrees with {group}')
         command_tick = np.empty(0, np.float64)
+        action_dim = metadata.get('policy', {}).get('model_config', {}).get('action_dim', 9)
         if command_count:
             command_tick = _array(file, 'commands/tick', (command_count,))
             if np.any(np.diff(command_tick) <= 0):
                 raise ValueError('Command timestamps must strictly increase')
             _check_pose(_array(file, 'commands/pose', (command_count, 7)), 'commands/pose')
-            requested = _array(file, 'commands/requested_action', (command_count, 10))
+            action_dim = file['commands/requested_action'].shape[-1]
+            if action_dim not in (9, 10):
+                raise ValueError('Expected 9 or legacy 10 command action dimensions')
+            requested = _array(file, 'commands/requested_action', (command_count, action_dim))
             target = _array(file, 'commands/gripper_target', (command_count,))
-            if np.any((target < 0) | (target > .08)) or np.any((requested[:, 9] < 0) | (requested[:, 9] > .08)):
+            if np.any((target < 0) | (target > .08)) or (action_dim == 10 and np.any((requested[:, 9] < 0) | (requested[:, 9] > .08))):
                 raise ValueError('Command gripper width outside [0, .08] m')
             modes = _array(file, 'commands/gripper_mode', (command_count,), 'iu')
             busy = _array(file, 'commands/gripper_busy', (command_count,), 'biu')
@@ -176,8 +192,11 @@ class RLDataset(Dataset):
                 raise ValueError('Invalid command plan/action reference')
         if plan_count:
             shape = file['plans/actions'].shape
-            if len(shape) != 3 or shape[0] != plan_count or shape[1] < 1 or shape[2] != 10:
-                raise ValueError('Expected plans/actions shape (P, horizon, 10)')
+            if len(shape) != 3 or shape[0] != plan_count or shape[1] < 1 or shape[2] not in (9, 10):
+                raise ValueError('Expected plans/actions shape (P, horizon, 9 or legacy 10)')
+            if command_count and shape[2] != action_dim:
+                raise ValueError('Plan/command action dimensions disagree')
+            action_dim = shape[2]
             actions = _array(file, 'plans/actions', shape)
             _array(file, 'plans/init_noise', shape)
             plan_tick = _array(file, 'plans/tick', (plan_count,))
@@ -193,7 +212,7 @@ class RLDataset(Dataset):
                 raise ValueError('Noncausal plan history')
             _check_pose(_array(file, 'plans/actual_pose', (*history_shape, 7)), 'plans/actual_pose')
             plan_width = _array(file, 'plans/actual_gripper', history_shape)
-            if np.any((plan_width < 0) | (plan_width > .085)) or np.any((actions[..., 9] < 0) | (actions[..., 9] > .08)):
+            if np.any((plan_width < 0) | (plan_width > .085)) or (action_dim == 10 and np.any((actions[..., 9] < 0) | (actions[..., 9] > .08))):
                 raise ValueError('Invalid plan gripper width')
             for camera in ('wrist', 'external'):
                 if file['plans/rgb/' + camera].shape != history_shape:
@@ -239,7 +258,7 @@ class RLDataset(Dataset):
                 or bool(terminated[-1]) != (not timeout) or bool(truncated[-1]) != timeout):
             raise ValueError('Rewards/terminal flags disagree with the episode label')
         return dict(tick=tick, starts=starts, ends=ends, reward=reward, dt=dt,
-                    terminated=terminated.astype(bool), truncated=truncated.astype(bool), plans=plan_count)
+                    terminated=terminated.astype(bool), truncated=truncated.astype(bool), plans=plan_count, action_dim=action_dim)
 
     def __len__(self):
         return len(self.indices)
@@ -283,12 +302,13 @@ class RLDataset(Dataset):
             for key, dtype in [('tick', np.float64), ('requested_action', np.float32),
                                ('gripper_target', np.float32), ('gripper_mode', np.int64),
                                ('gripper_busy', bool), ('plan_id', np.int64), ('action_index', np.int64)]:
-                tail = (10,) if key == 'requested_action' else ()
+                tail = (episode['action_dim'],) if key == 'requested_action' else ()
                 value = file['commands/' + key][begin:end] if end > begin else np.empty((0, *tail))
                 commands[key] = torch.from_numpy(value.astype(dtype))
             pose = file['commands/pose'][begin:end] if end > begin else np.empty((0, 7))
             action = torch.from_numpy(np.concatenate(
                 [pose7_to_pose9(pose), commands['gripper_target'].numpy()[:, None]], axis=-1).astype(np.float32))
+            action = action[..., :episode['action_dim']]
         commands['index'] = torch.arange(begin, end)
         commands['is_new'] = commands['index'] >= start
         effective = np.maximum(commands['tick'].numpy(), tick)

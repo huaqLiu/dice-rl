@@ -23,11 +23,14 @@ from my_dice_rl.util.rl_checkpoint import (RL_CHECKPOINT_SCHEMA, snapshot_teache
     load_rl_checkpoint, export_rl_policy)
 from my_dice_rl.util.rl_config import digest, file_digest
 from my_dice_rl.util.rl_coordination import DeviceLease
+from my_dice_rl.util.orientation_constraint import orientation_config
 
 
 class TrainDiceAgent:
     def __init__(self, config, resume=None):
         self.config = copy.deepcopy(config)
+        execution = yaml.safe_load(Path(config['execution_config']).read_text())
+        self.config['orientation_constraint'] = orientation_config(execution.get('orientation_constraint'))
         t, m = config['training'], config['model']
         self.device = torch.device(t['device'])
         if self.device.type not in ('cpu', 'cuda') or self.device.type == 'cuda' and not torch.cuda.is_available():
@@ -45,14 +48,14 @@ class TrainDiceAgent:
                 teacher, self.teacher_payload = snapshot_teacher(config['teacher_checkpoint'], self.device)
             if file_digest(config['teacher_checkpoint']) != self.teacher_payload['sha256']:
                 raise ValueError('Base DP checkpoint differs from frozen teacher')
-            self.model = DistillRL(teacher, m).to(self.device).train()
+            self.model = DistillRL(teacher, m, self.config['orientation_constraint']).to(self.device).train()
         if m['chunk_steps'] > teacher.horizon_steps:
             raise ValueError('RL chunk_steps exceeds teacher horizon')
         task = copy.deepcopy(self.teacher_payload['task'])
         if task.get('allow_demo', True) and not config['data']['allow_demo']:
             raise ValueError('Synthetic teacher requires data.allow_demo=true')
         task['dataset_path'] = config['expert_dataset']
-        self.expert_dataset, _ = make_datasets(task, self.teacher_payload['model_config']['image_size'])
+        self.expert_dataset, _ = make_datasets(task, self.teacher_payload['model_config']['image_size'], self.model.action_dim)
         if self.expert_dataset.metadata['dataset_id'] != self.teacher_payload['dataset_id']:
             raise ValueError('Expert dataset is not the frozen DP training dataset')
         self.policy_dt = 1. / float(task['record_hz'])
@@ -146,7 +149,7 @@ class TrainDiceAgent:
                     raise ValueError('Online rollout coordinate mismatch: ' + key)
             t, m = self.config['training'], self.config['model']
             chunks = OnlineChunks(data, m['chunk_steps'], self.model.horizon, self.policy_dt,
-                                  t['gamma'], self.config['reward'], t['chunk_stride'])
+                                  t['gamma'], self.config['reward'], t['chunk_stride'], self.model.action_dim)
             self._ingest(chunks)
             stat = path.stat()
             self.data_manifest['online'][str(path)] = dict(rollout_sha256=file_digest(path),

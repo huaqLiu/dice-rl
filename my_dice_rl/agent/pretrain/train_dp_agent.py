@@ -44,13 +44,21 @@ class TrainDPAgent:
         np.random.seed(cfg['seed'])
         torch.manual_seed(cfg['seed'])
         self.model_args = model_config(config)
-        self.train_dataset, self.val_dataset = make_datasets(config['task'], self.model_args['image_size'])
+        self.train_dataset, self.val_dataset = make_datasets(config['task'], self.model_args['image_size'],
+                                                          self.model_args['action_dim'])
         state = load_checkpoint(resume) if resume else None
         self.signature = dict(model=self.model_args,
             task={k: v for k, v in config['task'].items() if k != 'dataset_path'},
             training={k: cfg[k] for k in ('seed', 'batch_size', 'max_train_steps', 'learning_rate',
                 'weight_decay', 'warmup_steps', 'min_lr_ratio', 'grad_clip_norm', 'use_amp', 'ema_decay')})
+        if cfg.get('vision_learning_rate') is not None:
+            self.signature['training']['vision_learning_rate'] = cfg['vision_learning_rate']
         if state:
+            saved_action_dim = state['model_config'].get('action_dim',
+                int(state['model']['action_normalizer.center'].numel()))
+            if saved_action_dim != self.model_args['action_dim']:
+                raise ValueError(f"Checkpoint action_dim={saved_action_dim} cannot resume a "
+                    f"{self.model_args['action_dim']}D action model; start a new run and reuse demonstrations")
             if state['signature'] != self.signature:
                 raise ValueError('Resume model/task/optimizer settings differ from checkpoint')
             if state['dataset_id'] != self.train_dataset.metadata['dataset_id']:
@@ -60,11 +68,19 @@ class TrainDPAgent:
         if state:
             self.model.load_state_dict(state['model'])
         else:
-            self.model.fit_normalizer(*self.train_dataset.normalizer_data())
+            self.model.fit_normalizer(*self.train_dataset.normalizer_data(
+                self.model.state_normalizer.feature_dim))
         self.model.to(self.device)
         self.ema = EMA(self.model, cfg['ema_decay'])
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=cfg['learning_rate'],
-                                           weight_decay=cfg['weight_decay'])
+        parameters = [p for p in self.model.parameters() if p.requires_grad]
+        if cfg.get('vision_learning_rate') is not None:
+            vision = [p for p in self.model.obs_encoder.backbones.parameters() if p.requires_grad]
+            vision_ids = {id(p) for p in vision}
+            parameters = [dict(params=[p for p in parameters if id(p) not in vision_ids],
+                               lr=cfg['learning_rate'], name='policy')]
+            if vision:
+                parameters.append(dict(params=vision, lr=cfg['vision_learning_rate'], name='vision'))
+        self.optimizer = torch.optim.AdamW(parameters, lr=cfg['learning_rate'], weight_decay=cfg['weight_decay'])
         self.steps_per_epoch = math.ceil(len(self.train_dataset) / cfg['batch_size'])
         if cfg['max_train_steps'] is not None:
             self.steps_per_epoch = min(self.steps_per_epoch, cfg['max_train_steps'])
@@ -84,6 +100,9 @@ class TrainDPAgent:
         self.epoch, self.batch_in_epoch, self.global_step = 0, 0, 0
         self.best_loss = float('inf')
         self.training_complete = False
+        self.early_stop_best = float('inf')
+        self.epochs_without_improvement = 0
+        self.stop_reason = ''
         if state:
             self.ema.load_state_dict(state['ema'])
             self.optimizer.load_state_dict(state['optimizer'])
@@ -91,7 +110,15 @@ class TrainDPAgent:
             self.scaler.load_state_dict(state['scaler'])
             self.epoch, self.batch_in_epoch = state['epoch'], state['batch_in_epoch']
             self.global_step, self.best_loss = state['global_step'], state['best_loss']
-            self.training_complete = bool(state.get('training_complete', False) and self.epoch >= cfg['epochs'])
+            self.early_stop_best = state.get('early_stop_best', self.best_loss)
+            self.epochs_without_improvement = state.get('epochs_without_improvement', 0)
+            self.stop_reason = state.get('stop_reason', '')
+            patience = cfg.get('early_stopping_patience')
+            self.training_complete = bool(state.get('training_complete', False) and (
+                self.epoch >= cfg['epochs'] or (patience is not None and self.stop_reason == 'early_stopping'
+                                              and self.epochs_without_improvement >= patience)))
+            if not self.training_complete:
+                self.stop_reason = ''
             resume_path = Path(resume).resolve()
             self.run_dir = resume_path.parent.parent
             restore_rng(state['rng'])
@@ -120,6 +147,15 @@ class TrainDPAgent:
             raise ValueError('num_workers/warmup_steps must be nonnegative')
         if cfg['learning_rate'] <= 0 or cfg['weight_decay'] < 0 or cfg['grad_clip_norm'] <= 0:
             raise ValueError('Invalid optimizer parameters')
+        vision_lr = cfg.get('vision_learning_rate')
+        if vision_lr is not None and (isinstance(vision_lr, bool) or not math.isfinite(vision_lr) or vision_lr <= 0):
+            raise ValueError('vision_learning_rate must be positive or null')
+        patience = cfg.get('early_stopping_patience')
+        if patience is not None and (isinstance(patience, bool) or not isinstance(patience, int) or patience < 1):
+            raise ValueError('early_stopping_patience must be positive or null')
+        delta = cfg.get('early_stopping_min_delta', 0.)
+        if isinstance(delta, bool) or not math.isfinite(delta) or delta < 0:
+            raise ValueError('early_stopping_min_delta must be finite and nonnegative')
         if not 0 <= cfg['min_lr_ratio'] <= 1:
             raise ValueError('min_lr_ratio must be in [0,1]')
         for key, default in [('torch_threads', 2), ('checkpoint_every', 0)]:
@@ -167,12 +203,15 @@ class TrainDPAgent:
             scaler=self.scaler.state_dict(), epoch=self.epoch, batch_in_epoch=self.batch_in_epoch,
             global_step=self.global_step, best_loss=self.best_loss,
             training_complete=self.training_complete,
+            early_stop_best=self.early_stop_best, epochs_without_improvement=self.epochs_without_improvement,
+            stop_reason=self.stop_reason,
             schedule_total_steps=self.schedule_total_steps, rng=rng_state())
         last = self.run_dir / 'checkpoint/last.pt'
         atomic_save(last, state)
         progress = dict(updated_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(),
             global_step=self.global_step, epoch=self.epoch, batch_in_epoch=self.batch_in_epoch,
             training_complete=self.training_complete,
+            epochs_without_improvement=self.epochs_without_improvement, stop_reason=self.stop_reason,
             best_loss=self.best_loss if math.isfinite(self.best_loss) else None)
         temporary_progress = self.run_dir/'progress.json.tmp'
         temporary_progress.write_text(json.dumps(progress,allow_nan=False))
@@ -189,6 +228,8 @@ class TrainDPAgent:
 
     def run(self, stop_event=None):
         cfg = self.config['training']
+        if self.training_complete:
+            return self.run_dir
         if self.epoch >= cfg['epochs'] and not self.training_complete:
             # A pause can arrive after the final update but before validation.
             val_loss = self.validate()
@@ -260,14 +301,30 @@ class TrainDPAgent:
                 is_best = selection < self.best_loss
                 self.best_loss = min(self.best_loss, selection)
                 self.training_complete = self.epoch >= cfg['epochs'] and self.batch_in_epoch == 0
+                if val_loss is not None and cfg.get('early_stopping_patience') is not None:
+                    if val_loss < self.early_stop_best-cfg.get('early_stopping_min_delta', 0.):
+                        self.early_stop_best, self.epochs_without_improvement = val_loss, 0
+                    else:
+                        self.epochs_without_improvement += 1
+                    if self.epochs_without_improvement >= cfg['early_stopping_patience']:
+                        self.training_complete, self.stop_reason = True, 'early_stopping'
                 metrics = dict(epoch=epoch+1, next_epoch=self.epoch, batch_in_epoch=self.batch_in_epoch,
                     global_step=self.global_step, train_loss=train_loss, val_loss=val_loss,
                     learning_rate=self.optimizer.param_groups[0]['lr'], skipped_amp_updates=skipped,
                     selection_metric='val_loss' if val_loss is not None else 'train_loss')
+                if cfg.get('vision_learning_rate') is not None:
+                    metrics['vision_learning_rate'] = next((group['lr'] for group in self.optimizer.param_groups
+                                                            if group.get('name') == 'vision'), None)
+                if cfg.get('early_stopping_patience') is not None:
+                    metrics.update(epochs_without_improvement=self.epochs_without_improvement,
+                                   stop_reason=self.stop_reason)
                 with (self.run_dir / 'metrics.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(metrics, allow_nan=False) + '\n')
                 self.save(is_best)
                 print(json.dumps(metrics), flush=True)
+                if self.stop_reason == 'early_stopping':
+                    print('Validation early stopping; best.pt preserves the best EMA policy.', flush=True)
+                    break
                 if cfg['max_total_steps'] is not None and self.global_step >= cfg['max_total_steps']:
                     break
         except KeyboardInterrupt:

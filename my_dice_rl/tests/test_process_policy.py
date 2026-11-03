@@ -12,6 +12,7 @@ from my_dice_rl.util.rotation import pose7_to_pose9
 
 class FakeWorkerPolicy:
     obs_steps, dt, horizon, act_steps, image_size = 2, .1, 20, 4, 224
+    action_dim = 9
 
     def __init__(self, path):
         self.path = path
@@ -22,7 +23,7 @@ class FakeWorkerPolicy:
         if self.path == 'slow':
             time.sleep(.4)
         self.calls += 1
-        action = np.r_[pose7_to_pose9(history[-1]['eef'].value), 0.].astype(np.float32)
+        action = pose7_to_pose9(history[-1]['eef'].value).astype(np.float32)
         action = np.repeat(action[None], self.horizon, axis=0)
         return action, np.full_like(action, self.calls)
 
@@ -43,7 +44,7 @@ def test_worker_is_a_separate_persistent_process_and_preserves_observations():
         history = [dict(eef=Sample(0., 0., pose)) for _ in range(2)]
         first, first_noise = proxy.predict(history)
         second, second_noise = proxy.predict(history)
-        assert first.shape == (20, 10)
+        assert first.shape == (20, 9)
         np.testing.assert_array_equal(first, second)
         np.testing.assert_allclose(first[:, :3], np.repeat(pose[None, :3], 20, axis=0))
         assert np.all(first_noise == 1) and np.all(second_noise == 2)

@@ -1,0 +1,46 @@
+ros2 launch franka_bringup franka.launch.py robot_ip:=172.16.0.2 load_gripper:=true
+
+ros2 run controller_manager spawner panda_cartesian_impedance_controller
+ros2 run controller_manager spawner panda_drag_controller
+
+bash script/collect_drag.sh
+
+source /opt/ros/humble/setup.bash
+source /home/lhq/dice-rl/my_dice_rl/ros_ws/install/setup.bash
+
+ros2 action send_goal /panda_gripper/grasp franka_msgs/action/Grasp \
+  "{width: 0.0, speed: 0.02, force: 5.0, epsilon: {inner: 0.005, outer: 0.08}}" \
+  --feedback
+
+
+cd /home/lhq/dice-rl
+
+my_dice_rl/.venv-dp/bin/python -m my_dice_rl.script.process_gear_dataset \
+  --input datasets/demonstrations_drag/gear_insertion \
+  --output datasets/processed/gear_insertion_drag_v2.zarr \
+  --action-dim 9
+
+cd /home/lhq/dice-rl/my_dice_rl
+
+bash script/train_dp.sh \
+  --config cfg/pretrain/train_dp_clip.yaml \
+  --set \
+  task.dataset_path=datasets/processed/gear_insertion_drag_v2.zarr \
+  training.output_root=log_dir/pretrain/gear_dp_clip_pose9_v2
+
+
+bash script/train_dp.sh   --set   task.dataset_path=datasets/processed/gear_insertion_drag_v1.zarr  
+   model.state_dim=9   training.device=cuda:0   training.epochs=500  
+ training.batch_size=8   training.output_root=log_dir/pretrain/gear_dp_drag_v1
+
+cd /home/lhq/dice-rl/my_dice_rl
+bash script/train_dp.sh --config cfg/pretrain/train_dp_clip.yaml
+
+bash script/execute_dp.sh \
+  --checkpoint /home/lhq/dice-rl/my_dice_rl/log_dir/pretrain/gear_dp_clip_pose9_v2/20261102_215636_463296/checkpoint/best.pt
+
+  cd /home/lhq/dice-rl/my_dice_rl
+
+bash script/train_rl.sh \
+  --config cfg/finetune/train_dice_clip_pose9_v2_live.yaml \
+  --watch

@@ -227,7 +227,8 @@ class DPExecutor:
         self.stop_diagnostics = diagnostics
         self.stop_started, self.state = now, 'STOPPING'
         self.backend.cancel()
-        self.message = '停止中：保持新鲜实测位姿，等待夹爪取消确认'
+        self.message = ('停止中：保持新鲜实测位姿' if self.policy.action_dim == 9 else
+                        '停止中：保持新鲜实测位姿，等待夹爪取消确认')
 
     def _poll(self, now):
         if self.future is None or not self.future.done():
@@ -251,7 +252,8 @@ class DPExecutor:
                 if latency > self.config['max_inference_latency_s']:
                     raise ValueError(f'推理结果过迟：{latency:.3f}s')
                 actions, noise = value
-                if actions.shape != (self.policy.horizon, 10) or not np.isfinite(actions).all():
+                if (actions.shape != (self.policy.horizon, self.policy.action_dim) or noise.shape != actions.shape
+                        or not np.isfinite(actions).all() or not np.isfinite(noise).all()):
                     raise ValueError('模型返回无效动作序列')
                 self.plan_id += 1
                 self.plan = dict(tick=self.prediction_history[-1]['tick'], actions=actions,
@@ -331,7 +333,9 @@ class DPExecutor:
             self.future_kind = 'predict'
             self.next_inference = now+self.policy.act_steps*self.policy.dt
         from my_dice_rl.util.rotation import pose7_to_pose9
-        requested = np.r_[pose7_to_pose9(frame['eef'].value), self.backend.gripper_target]
+        requested = pose7_to_pose9(frame['eef'].value)
+        if self.policy.action_dim == 10:
+            requested = np.r_[requested, self.backend.gripper_target]
         plan_id, action_index = -1, -1
         if self.plan is not None:
             age = now-self.plan['tick']
@@ -341,7 +345,8 @@ class DPExecutor:
             requested, plan_id = self.plan['actions'][action_index], self.plan['id']
             self.last_command = limit_command(requested, self.last_command,
                 np.asarray(frame['eef'].value), self.reset_pose, dt, self.config)
-            self.backend.send_gripper(float(requested[9]))
+            if self.policy.action_dim == 10:
+                self._send_gripper(float(requested[9]))
         self.backend.publish(self.last_command)
         self.writer.put('commands', dict(tick=np.float64(now), requested_action=requested,
             pose=self.last_command.copy(), gripper_target=np.float32(self.backend.gripper_target),
@@ -363,6 +368,9 @@ class DPExecutor:
             self.last_observation_tick = self.next_record
             self.next_record += self.policy.dt
 
+    def _send_gripper(self, target):
+        self.backend.send_gripper(target)
+
     def _stopping(self, now):
         try:
             latest = self.buffer.latest('eef')
@@ -371,7 +379,7 @@ class DPExecutor:
                 if not self.writer.error:
                     from my_dice_rl.util.rotation import pose7_to_pose9
                     self.writer.put('commands', dict(tick=np.float64(now),
-                        requested_action=np.r_[pose7_to_pose9(latest.value), self.backend.gripper_target],
+                        requested_action=np.r_[pose7_to_pose9(latest.value), self.backend.gripper_target][:self.policy.action_dim],
                         pose=np.asarray(latest.value), gripper_target=np.float32(self.backend.gripper_target),
                         gripper_mode=np.uint8(self.backend.gripper_mode), gripper_busy=np.uint8(self.backend.gripper_busy),
                         plan_id=np.int64(-1), action_index=np.int64(-1)))

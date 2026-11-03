@@ -1,5 +1,6 @@
 """A tiny network makes exact optimizer/RNG resume checks quick; CLI smoke uses real DP."""
 import copy
+from pathlib import Path
 
 import pytest
 import torch
@@ -18,21 +19,50 @@ from my_dice_rl.util.config import load_train_config
 class TinyPolicy(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        self.linear = nn.Linear(10, 10)
-        self.state_normalizer = FeatureNormalizer(10)
-        self.action_normalizer = FeatureNormalizer(10)
+        self.linear = nn.Linear(9, 9)
+        self.state_normalizer = FeatureNormalizer(9)
+        self.action_normalizer = FeatureNormalizer(9)
 
     def fit_normalizer(self, states, actions):
         self.state_normalizer.fit(states)
         self.action_normalizer.fit(actions)
 
     def compute_loss(self, batch):
-        state = torch.cat([batch['obs']['robot_eef_pose'][:, -1],
-                           batch['obs']['gripper_width'][:, -1]], dim=-1)
+        state = batch['obs']['robot_eef_pose'][:, -1]
         prediction = self.linear(self.state_normalizer.normalize(state))[:, None]
         target = self.action_normalizer.normalize(batch['action'])
         error = (prediction-target-torch.randn_like(target)*.1).square()
         return error[batch['valid_mask']].mean()
+
+
+def test_validation_early_stopping_preserves_best_and_resume_terminal_status(collected_episodes, tmp_path, monkeypatch):
+    dataset = tmp_path/'early_stop.zarr'
+    convert_dataset(collected_episodes, dataset, allow_demo=True)
+    config = load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=[
+        'task.allow_demo=true', 'training.device=cpu', 'training.num_workers=0',
+        'training.epochs=10', 'training.batch_size=2', 'training.max_train_steps=1',
+        'training.max_val_steps=1', 'training.use_amp=false', 'training.warmup_steps=0', 'model.image_size=32'])
+    config['task']['dataset_path'] = str(dataset)
+    config['training'].update(output_root=str(tmp_path/'runs'), early_stopping_patience=2,
+                               early_stopping_min_delta=0.)
+    monkeypatch.setattr(train_dp_agent, 'DiffusionPolicy', TinyPolicy)
+    agent = train_dp_agent.TrainDPAgent(copy.deepcopy(config))
+    values = iter([1., .8, .9, 1.1])
+    monkeypatch.setattr(agent, 'validate', lambda: next(values))
+    path = agent.run()
+    last, best = load_checkpoint(path/'checkpoint/last.pt'), load_checkpoint(path/'checkpoint/best.pt')
+    assert last['epoch'] == 4 and best['epoch'] == 2
+    assert last['training_complete'] and last['stop_reason'] == 'early_stopping'
+    resumed = train_dp_agent.TrainDPAgent(copy.deepcopy(config), path/'checkpoint/last.pt')
+    step = resumed.global_step
+    resumed.run()
+    assert resumed.training_complete and resumed.global_step == step
+    extended_config = copy.deepcopy(config)
+    extended_config['training'].update(early_stopping_patience=4, max_total_steps=step+1)
+    extended = train_dp_agent.TrainDPAgent(extended_config, path/'checkpoint/last.pt')
+    monkeypatch.setattr(extended, 'validate', lambda: .7)
+    extended.run()
+    assert extended.global_step == step+1 and extended.stop_reason == ''
 
 
 def test_resume_inside_epoch_preserves_rng_optimizer_ema_and_data_order(
@@ -40,7 +70,7 @@ def test_resume_inside_epoch_preserves_rng_optimizer_ema_and_data_order(
     torch.set_num_threads(2)
     output = tmp_path/'data.zarr'
     convert_dataset(collected_episodes, output, allow_demo=True)
-    config = load_train_config(overrides=[
+    config = load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=[
         'task.allow_demo=true', 'training.device=cpu', 'training.num_workers=0',
         'training.epochs=2', 'training.batch_size=2', 'training.max_train_steps=2',
         'training.max_val_steps=1', 'training.max_total_steps=2',

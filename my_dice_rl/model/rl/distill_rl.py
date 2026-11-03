@@ -8,6 +8,7 @@ import copy
 import torch
 from torch import nn
 from torch.nn import functional as F
+from my_dice_rl.util.orientation_constraint import orientation_config, constrain_action_tensor
 
 
 def mlp(input_dim, output_dim, hidden_dims):
@@ -26,7 +27,7 @@ class ResidualActor(nn.Module):
         self.network = mlp(feature_dim + horizon * action_dim, horizon * action_dim, hidden_dims)
         self.register_buffer('limit', torch.tensor(residual_limit, dtype=torch.float32))
         if self.limit.shape != (action_dim,) or not torch.isfinite(self.limit).all() or ((self.limit < 0) | (self.limit > 1)).any():
-            raise ValueError('residual_limit must be ten finite nonnegative normalized limits')
+            raise ValueError('residual_limit must match action_dim with finite normalized limits')
         # 第一轮部署等价于基础 DP，不以随机残差启动真机。
         nn.init.zeros_(self.network[-1].weight)
         nn.init.zeros_(self.network[-1].bias)
@@ -50,19 +51,23 @@ class CriticEnsemble(nn.Module):
 
 
 class DistillRL(nn.Module):
-    def __init__(self, teacher, config):
+    def __init__(self, teacher, config, orientation_constraint=None):
         super().__init__()
         self.teacher, self.config = teacher, copy.deepcopy(config)
+        self.orientation_constraint = orientation_config(orientation_constraint)
         teacher.requires_grad_(False).eval()
         self.feature_dim = teacher.obs_encoder.feature_dim * teacher.obs_steps
         self.horizon, self.chunk_steps = teacher.horizon_steps, int(config['chunk_steps'])
+        self.action_dim = teacher.action_normalizer.feature_dim
+        if config.get('action_dim', self.action_dim) != self.action_dim:
+            raise ValueError('RL action_dim differs from frozen DP; initialize a new RL run')
         if not 1 <= self.chunk_steps <= self.horizon or config['ensemble_size'] < 2:
             raise ValueError('Invalid chunk length or critic ensemble size')
         if not 1 <= config['target_subset'] <= config['ensemble_size']:
             raise ValueError('target_subset must fit critic ensemble')
-        self.actor = ResidualActor(self.feature_dim, self.horizon, 10,
+        self.actor = ResidualActor(self.feature_dim, self.horizon, self.action_dim,
                                    config['hidden_dims'], config['residual_limit'])
-        self.critic = CriticEnsemble(self.feature_dim, self.chunk_steps, 10,
+        self.critic = CriticEnsemble(self.feature_dim, self.chunk_steps, self.action_dim,
                                     config['hidden_dims'], config['ensemble_size'])
         self.target_actor = copy.deepcopy(self.actor).requires_grad_(False)
         self.target_critic = copy.deepcopy(self.critic).requires_grad_(False)
@@ -84,7 +89,16 @@ class DistillRL(nn.Module):
         actor = self.target_actor if target else self.actor
         residual = actor(features, noise)
         residual = residual.masked_fill(self.teacher.action_normalizer.constant, 0.)
-        return (base + residual).clamp(-1, 1), base
+        current = (base + residual).clamp(-1, 1)
+        if self.orientation_constraint['mode'] != 'none':
+            dimension = self.teacher.state_normalizer.feature_dim
+            actual = self.teacher.state_normalizer.unnormalize(features[:, -dimension:])
+            normalizer = self.teacher.action_normalizer
+            current = normalizer.normalize(constrain_action_tensor(
+                normalizer.unnormalize(current), actual, self.orientation_constraint))
+            base = normalizer.normalize(constrain_action_tensor(
+                normalizer.unnormalize(base), actual, self.orientation_constraint))
+        return current, base
 
     @staticmethod
     def td_target(reward, discount, terminated, next_q):
@@ -93,7 +107,7 @@ class DistillRL(nn.Module):
 
     def critic_loss(self, batch):
         with torch.no_grad():
-            noise = torch.randn(len(batch['features']), self.horizon, 10, device=batch['features'].device)
+            noise = torch.randn(len(batch['features']), self.horizon, self.action_dim, device=batch['features'].device)
             action, _ = self.action(batch['next_features'], noise, target=True)
             mask = torch.ones_like(batch['mask'])
             duration = torch.ones_like(batch['duration'])
@@ -111,7 +125,7 @@ class DistillRL(nn.Module):
         features = batch['features'].repeat_interleave(k, dim=0)
         mask = batch['mask'].repeat_interleave(k, dim=0)
         duration = batch['duration'].repeat_interleave(k, dim=0)
-        noise = torch.randn(count * k, self.horizon, 10, device=features.device)
+        noise = torch.randn(count * k, self.horizon, self.action_dim, device=features.device)
         current, base = self.action(features, noise)
         q = self.critic(features, current[:, :self.chunk_steps], mask, duration).amin(0).reshape(count, k)
         with torch.no_grad():
@@ -126,7 +140,7 @@ class DistillRL(nn.Module):
         distance = (current - base).square().mean((1, 2)).reshape(count, k)
         bc_loss = (distance * contraction).mean()
         # 高价值噪声样本作为同状态低价值样本的自模仿目标；默认权重可设为零。
-        candidates = current.reshape(count, k, self.horizon, 10)
+        candidates = current.reshape(count, k, self.horizon, self.action_dim)
         best = q.detach().argmax(1)
         best_action = candidates[torch.arange(count, device=q.device), best].detach()
         best_q = q.detach().gather(1, best[:, None])

@@ -1,6 +1,6 @@
 """DP 模型总入口：归一化 -> 编码观测 -> 训练去噪 / 采样动作序列。
 
-这里没有数据加载、优化器或机器人接口。动作表示：XYZ + rotation6d + 总开度。
+这里没有数据加载、优化器或机器人接口。新动作表示：XYZ + rotation6d。
 """
 import torch
 from torch import nn
@@ -12,12 +12,13 @@ from my_dice_rl.model.diffusion.conditional_unet1d import ConditionalUnet1D
 
 
 class DiffusionPolicy(nn.Module):
-    action_dim = 10
+    action_dim = 9
 
     def __init__(self, obs_steps=2, horizon_steps=20, act_steps=4,
                  down_dims=(256, 512, 1024), time_embed_dim=256,
                  train_diffusion_steps=50, inference_steps=16,
-                 pretrained_vision=False, image_size=224):
+                 pretrained_vision=False, image_size=224, state_dim=9, action_dim=9,
+                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False):
         super().__init__()
         if obs_steps < 1 or not 1 <= act_steps <= horizon_steps:
             raise ValueError("Require obs_steps >= 1 and 1 <= act_steps <= horizon_steps")
@@ -25,13 +26,17 @@ class DiffusionPolicy(nn.Module):
             raise ValueError("Require 1 <= inference_steps <= train_diffusion_steps")
         self.obs_steps, self.horizon_steps, self.act_steps = obs_steps, horizon_steps, act_steps
         self.inference_steps = inference_steps
-        self.obs_encoder = MultiImageEncoder(image_size, pretrained_vision)
+        if isinstance(action_dim, bool) or action_dim not in (9, 10):
+            raise ValueError('action_dim must be 9 or legacy 10')
+        self.action_dim = action_dim
+        self.obs_encoder = MultiImageEncoder(image_size, pretrained_vision, state_dim,
+                                            vision_encoder, frozen_vision, vision_augment)
         self.network = ConditionalUnet1D(
             self.action_dim, self.obs_encoder.feature_dim * obs_steps,
             down_dims=down_dims, time_embed_dim=time_embed_dim)
         if horizon_steps < 1 or horizon_steps % self.network.horizon_multiple:
             raise ValueError(f"horizon_steps must be divisible by {self.network.horizon_multiple}")
-        self.state_normalizer = FeatureNormalizer(10)
+        self.state_normalizer = FeatureNormalizer(state_dim)
         self.action_normalizer = FeatureNormalizer(self.action_dim)
         try:
             from diffusers import DDIMScheduler
@@ -44,7 +49,7 @@ class DiffusionPolicy(nn.Module):
 
     @torch.no_grad()
     def fit_normalizer(self, training_states, training_actions):
-        """states: (...,10) 实际位姿9+实际开度1；actions: (...,10) 目标动作。
+        """states: (...,9) 实际位姿；actions: (...,9) 目标位姿。
 
         必须由后续数据集只提供训练集统计数据。不要用验证集拟合。
         """
@@ -52,13 +57,19 @@ class DiffusionPolicy(nn.Module):
         self.action_normalizer.fit(training_actions)
 
     def encode_obs(self, obs):
-        pose, gripper = obs["robot_eef_pose"], obs["gripper_width"]
+        pose = obs["robot_eef_pose"]
         if pose.ndim != 3 or pose.shape[1:] != (self.obs_steps, 9):
             raise ValueError(f"Expected robot_eef_pose (B, {self.obs_steps}, 9)")
-        if gripper.shape != (*pose.shape[:2], 1):
-            raise ValueError("Expected gripper_width (B, To, 1)")
-        state = self.state_normalizer.normalize(torch.cat([pose, gripper], dim=-1))
-        normalized_obs = {**obs, "robot_eef_pose": state[..., :9], "gripper_width": state[..., 9:]}
+        state = pose
+        if self.obs_encoder.state_dim == 10:
+            gripper = obs['gripper_width']
+            if gripper.shape != (*pose.shape[:2], 1):
+                raise ValueError("Expected gripper_width (B, To, 1)")
+            state = torch.cat([pose, gripper], dim=-1)
+        state = self.state_normalizer.normalize(state)
+        normalized_obs = {**obs, "robot_eef_pose": state[..., :9]}
+        if self.obs_encoder.state_dim == 10:
+            normalized_obs['gripper_width'] = state[..., 9:]
         return self.obs_encoder(normalized_obs).flatten(start_dim=1)
 
     def forward(self, noisy_actions, timesteps, obs):
@@ -66,10 +77,10 @@ class DiffusionPolicy(nn.Module):
         return self.network(noisy_actions, timesteps, self.encode_obs(obs))
 
     def compute_loss(self, batch):
-        """batch={'obs': {...}, 'action': (B,H,10), 'valid_mask': 可选(B,H)}。"""
+        """batch={'obs': {...}, 'action': (B,H,action_dim), 'valid_mask': 可选(B,H)}。"""
         actions = batch["action"]
         if actions.ndim != 3 or actions.shape[1:] != (self.horizon_steps, self.action_dim):
-            raise ValueError(f"Expected actions (B, {self.horizon_steps}, 10)")
+            raise ValueError(f"Expected actions (B, {self.horizon_steps}, {self.action_dim})")
         actions = self.action_normalizer.normalize(actions)
         noise = torch.randn_like(actions)
         timesteps = torch.randint(self.noise_scheduler.config.num_train_timesteps,
@@ -120,5 +131,6 @@ class DiffusionPolicy(nn.Module):
             sample = scheduler.step(predicted_noise, timestep, sample, eta=0.,
                                     generator=generator).prev_sample
         prediction = self.action_normalizer.unnormalize(sample.clamp(-1, 1))
-        prediction = torch.cat([prediction[..., :9], prediction[..., 9:].clamp(0., .08)], dim=-1)
+        if self.action_dim == 10:
+            prediction = torch.cat([prediction[..., :9], prediction[..., 9:].clamp(0., .08)], dim=-1)
         return {"action": prediction[:, :self.act_steps], "action_pred": prediction}

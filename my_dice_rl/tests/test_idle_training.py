@@ -1,5 +1,6 @@
 """Idle supervisor and graceful DP resume tests never allocate a GPU."""
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import copy
 import json
 import signal
@@ -194,7 +195,7 @@ def test_cpu_rng_snapshot_does_not_initialize_cuda(monkeypatch):
 def test_graceful_stop_after_update_resumes_exactly(collected_episodes, tmp_path, monkeypatch):
     data = tmp_path/'data.zarr'
     convert_dataset(collected_episodes, data, allow_demo=True)
-    config = load_train_config(overrides=['task.allow_demo=true', 'training.device=cpu',
+    config = load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=['task.allow_demo=true', 'training.device=cpu',
         'training.num_workers=0', 'training.epochs=2', 'training.batch_size=2',
         'training.max_train_steps=2', 'training.max_val_steps=1', 'training.max_total_steps=2',
         'training.use_amp=false', 'training.warmup_steps=0', 'model.image_size=64',

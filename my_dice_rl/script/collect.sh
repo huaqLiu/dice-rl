@@ -6,12 +6,14 @@ cd "$project_root/.."
 demo=false
 cameras=true
 teleop=true
+drag=false
 gui_args=()
 for arg in "$@"; do
     case "$arg" in
         --demo) demo=true; gui_args+=("$arg");;
         --no-cameras) cameras=false;;
         --no-teleop) teleop=false;;
+        --drag) drag=true; teleop=false; gui_args+=("$arg");;
         *) gui_args+=("$arg");;
     esac
 done
@@ -25,7 +27,9 @@ if [ ! -f "$robot_setup" ]; then
     exit 1
 fi
 source "$robot_setup"
-/usr/bin/python3 "$project_root/script/check_controller_setup.py" "$project_root/cfg/teleop.yaml"
+control_config="$project_root/cfg/teleop.yaml"
+if [ "$drag" = true ]; then control_config="$project_root/cfg/collect_drag.yaml"; fi
+/usr/bin/python3 "$project_root/script/check_controller_setup.py" "$control_config"
 mkdir -p "$project_root/log_dir/collection"
 run_log="$(mktemp -d "$project_root/log_dir/collection/run_XXXXXXXX")"
 pids=()

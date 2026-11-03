@@ -142,15 +142,18 @@ def test_rotation_decode_and_cartesian_speed_limit(runtime):
     action = np.r_[pose7_to_pose9(backend.pose), 0.]
     action[0] += .02
     command = limit_command(action, backend.pose, backend.pose, backend.pose, .02, engine.config)
-    assert np.linalg.norm(command[:3]-backend.pose[:3]) <= .025*.02 + 1e-9
+    assert np.linalg.norm(command[:3]-backend.pose[:3]) <= engine.config['max_linear_speed']*.02 + 1e-9
     assert quaternion_angle(command[3:], backend.pose[3:]) < 1e-6
-    action[0] += .3
+    action[0] = backend.pose[0] + engine.config['max_translation_from_reset'] + .01
     with pytest.raises(ValueError, match='范围'):
         limit_command(action, backend.pose, backend.pose, backend.pose, .02, engine.config)
 
 
-def test_manual_reset_stop_label_and_terminal_reward(runtime):
+def test_manual_reset_stop_label_and_terminal_reward(runtime, monkeypatch):
     engine, buffer, backend = runtime
+    def reject_gripper_command(target):
+        raise AssertionError('9D pose policy must never command the gripper')
+    monkeypatch.setattr(backend, 'send_gripper', reject_gripper_command)
     engine.submit('start')
     pump(engine, buffer, backend, .04)
     assert engine.state == 'RESET' and not backend.commands
@@ -164,7 +167,7 @@ def test_manual_reset_stop_label_and_terminal_reward(runtime):
     pump(engine, buffer, backend, .04)
     assert engine.state == 'RUNNING', engine.status()  # Cannot label while motion is running.
     engine.submit('stop')
-    pump(engine, buffer, backend, .5,
+    pump(engine, buffer, backend, 3.,
          until=lambda: engine.state == 'LABEL' and engine.writer.frames >= 2)
     assert not backend.active
     assert backend.has_lock  # Preserve the stopped scene until the human supplies a label.
@@ -178,8 +181,8 @@ def test_manual_reset_stop_label_and_terminal_reward(runtime):
         assert file['transitions/terminated'][-1]
         assert not file['transitions/truncated'][-1]
         assert len(file['observations/pose']) == len(reward)+1
-        assert file['commands/requested_action'].shape[1] == 10
-        assert file['plans/init_noise'].shape[1:] == (20, 10)
+        assert file['commands/requested_action'].shape[1] == 9
+        assert file['plans/init_noise'].shape[1:] == (20, 9)
         assert np.all(file['transitions/command_end'][:] <= len(file['commands/tick']))
     before = len(backend.commands)
     engine.submit('start')

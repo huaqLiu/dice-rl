@@ -7,8 +7,9 @@ import yaml
 
 from my_dice_rl.model.diffusion.diffusion_policy import DiffusionPolicy
 from my_dice_rl.model.rl.distill_rl import ResidualActor
-from my_dice_rl.util.checkpoint import atomic_save, load_checkpoint, load_policy
+from my_dice_rl.util.checkpoint import atomic_save, load_checkpoint, load_policy, policy_model_config
 from my_dice_rl.util.rl_config import execution_limits, file_digest, require_review, digest
+from my_dice_rl.util.orientation_constraint import orientation_config, constrain_action_tensor
 
 RL_CHECKPOINT_SCHEMA = 'dice_gear_rl_checkpoint_v1'
 RL_POLICY_SCHEMA = 'dice_gear_rl_policy_v1'
@@ -19,11 +20,14 @@ def snapshot_teacher(path, device):
     payload = dict(model_config=copy.deepcopy(state['model_config']), task=copy.deepcopy(state['config']['task']),
                    dataset_id=state['dataset_id'], sha256=file_digest(path),
                    model={k: v.detach().cpu() for k, v in teacher.state_dict().items()})
+    payload['model_config']['state_dim'] = teacher.state_normalizer.feature_dim
+    payload['model_config']['action_dim'] = teacher.action_normalizer.feature_dim
     return teacher, payload
 
 
 def teacher_from_payload(payload, device='cpu'):
-    teacher = DiffusionPolicy(**{**payload['model_config'], 'pretrained_vision': False})
+    teacher = DiffusionPolicy(**{**policy_model_config(payload['model_config'], payload['model']),
+                                'pretrained_vision': False})
     teacher.load_state_dict(payload['model'], strict=True)
     if not teacher.state_normalizer.fitted or not teacher.action_normalizer.fitted:
         raise ValueError('Frozen DP normalizers are not fitted')
@@ -37,7 +41,7 @@ def load_rl_checkpoint(path):
     return state
 
 
-def export_rl_policy(checkpoint, output, allow_draft=False):
+def export_rl_policy(checkpoint, output, allow_draft=False, execution_config=None):
     if Path(output).exists():
         raise FileExistsError('Choose a new immutable policy filename: ' + str(output))
     state = load_rl_checkpoint(checkpoint)
@@ -53,12 +57,15 @@ def export_rl_policy(checkpoint, output, allow_draft=False):
             raise
     if not deployable and not allow_draft:
         raise ValueError('模拟/未训练策略不能导出为真机部署包；仅离线检查可使用 --allow-draft')
-    execution = yaml.safe_load(Path(config['execution_config']).read_text())
+    execution_path = execution_config if execution_config is not None else config['execution_config']
+    execution = yaml.safe_load(Path(execution_path).read_text())
     payload = dict(schema=RL_POLICY_SCHEMA, teacher=state['teacher'], model_config=config['model'],
         actor=state['model']['actor'], global_step=state['global_step'], actor_updates=state.get('actor_updates', 0), simulated=simulated,
+        round_stop=state.get('round_stop', state['global_step']),
         deployable=deployable, review=review, review_digest=digest(review),
         execution_limits=execution_limits(execution), teacher_sha256=state['teacher']['sha256'],
         training_checkpoint_sha256=file_digest(checkpoint),
+        training_orientation_constraint=config.get('orientation_constraint'),
         algorithm='frozen_dp_residual_dice', data_manifest=state['data_manifest'])
     # 导出前实例化并严格校验，避免导出缺失权重或错误维度。
     # 校验时的随机网络初始化不能改变 learner 下一步的 RNG，保证恢复训练一致。
@@ -72,10 +79,12 @@ def export_rl_policy(checkpoint, output, allow_draft=False):
 
 
 class ResidualPolicy(torch.nn.Module):
-    def __init__(self, teacher, actor, chunk_steps):
+    def __init__(self, teacher, actor, chunk_steps, orientation_constraint=None):
         super().__init__()
         self.teacher, self.actor = teacher, actor
+        self.orientation_constraint = orientation_config(orientation_constraint)
         self.obs_steps, self.horizon_steps, self.act_steps = teacher.obs_steps, teacher.horizon_steps, chunk_steps
+        self.action_dim = teacher.action_normalizer.feature_dim
 
     @property
     def state_normalizer(self):
@@ -88,16 +97,25 @@ class ResidualPolicy(torch.nn.Module):
     @torch.no_grad()
     def predict_action(self, obs, init_noise=None, generator=None):
         features = self.teacher.encode_obs(obs)
+        return self.predict_action_from_features(features, init_noise, generator)
+
+    @torch.no_grad()
+    def predict_action_from_features(self, features, init_noise=None, generator=None):
         if init_noise is None:
-            init_noise = torch.randn(len(features), self.horizon_steps, 10,
+            init_noise = torch.randn(len(features), self.horizon_steps, self.action_dim,
                                      device=features.device, generator=generator)
-        if init_noise.shape != (len(features), self.horizon_steps, 10) or not torch.isfinite(init_noise).all():
+        if init_noise.shape != (len(features), self.horizon_steps, self.action_dim) or not torch.isfinite(init_noise).all():
             raise ValueError('Invalid RL initial noise')
         physical = self.teacher.predict_action_from_features(features, init_noise)['action_pred']
         base = self.action_normalizer.normalize(physical).clamp(-1, 1)
         residual = self.actor(features, init_noise).masked_fill(self.action_normalizer.constant, 0.)
         action = self.action_normalizer.unnormalize((base + residual).clamp(-1, 1))
-        action = torch.cat([action[..., :9], action[..., 9:].clamp(0., .08)], dim=-1)
+        if self.orientation_constraint['mode'] != 'none':
+            dimension = self.state_normalizer.feature_dim
+            actual = self.state_normalizer.unnormalize(features[:, -dimension:])
+            action = constrain_action_tensor(action, actual, self.orientation_constraint)
+        if self.action_dim == 10:
+            action = torch.cat([action[..., :9], action[..., 9:].clamp(0., .08)], dim=-1)
         return dict(action=action[:, :self.act_steps], action_pred=action)
 
 
@@ -106,11 +124,14 @@ def policy_from_payload(payload, device='cpu'):
         raise ValueError('Not a self-contained RL deployment policy')
     teacher = teacher_from_payload(payload['teacher'], device)
     config = payload['model_config']
+    if config.get('action_dim', teacher.action_dim) != teacher.action_dim:
+        raise ValueError('RL deployment action_dim differs from frozen DP')
     if not 1 <= config['chunk_steps'] <= teacher.horizon_steps:
         raise ValueError('RL action window exceeds teacher horizon')
     actor = ResidualActor(teacher.obs_steps * teacher.obs_encoder.feature_dim, teacher.horizon_steps,
-                          10, config['hidden_dims'], config['residual_limit']).to(device)
+                          teacher.action_dim, config['hidden_dims'], config['residual_limit']).to(device)
     actor.load_state_dict(payload['actor'], strict=True)
     if not torch.equal(actor.limit.cpu(), torch.tensor(config['residual_limit'], dtype=torch.float32)):
         raise ValueError('Residual bounds disagree with deployment metadata')
-    return ResidualPolicy(teacher, actor, config['chunk_steps']).to(device).eval()
+    return ResidualPolicy(teacher, actor, config['chunk_steps'],
+        payload.get('execution_limits', {}).get('orientation_constraint')).to(device).eval()

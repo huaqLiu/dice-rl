@@ -2,7 +2,8 @@
 import numpy as np
 
 from my_dice_rl.util.rotation import (rotation6d_to_matrix, matrix_to_quaternion,
-    quaternion_angle, interpolate_quaternion)
+    quaternion_angle, interpolate_quaternion, quaternion_to_matrix)
+from my_dice_rl.util.orientation_constraint import orientation_config, vertical_rotation
 
 
 def check_observation(frame, config):
@@ -18,10 +19,19 @@ def check_observation(frame, config):
 
 def limit_command(action, previous, actual, reset, dt, config):
     action = np.asarray(action, dtype=np.float64)
-    if action.shape != (10,) or not np.isfinite(action).all() or not 0 <= action[9] <= .08:
-        raise ValueError('策略动作必须是有限的10维值，夹爪范围0–0.08米')
-    rotation = matrix_to_quaternion(rotation6d_to_matrix(action[3:9]))
-    goal = np.r_[action[:3], rotation]
+    if action.shape not in ((9,), (10,)) or not np.isfinite(action).all():
+        raise ValueError('策略动作必须是有限的9维位姿（或旧10维动作）')
+    if len(action) == 10 and not 0 <= action[9] <= .08:
+        raise ValueError('旧10维动作夹爪范围必须为0–0.08米')
+    matrix = rotation6d_to_matrix(action[3:9])
+    constraint = orientation_config(config.get('orientation_constraint'))
+    hold = False
+    if constraint['mode'] != 'none':
+        matrix = vertical_rotation(matrix, constraint['tool_z_sign'])
+        hold = (constraint['tool_z_sign'] * quaternion_to_matrix(actual[3:])[2, 2]
+                < np.cos(constraint['translation_hold_tilt_rad']))
+    rotation = matrix_to_quaternion(matrix)
+    goal = np.r_[actual[:3] if hold else action[:3], rotation]
     if (np.linalg.norm(goal[:3]-reset[:3]) > config['max_translation_from_reset']
             or np.linalg.norm(actual[:3]-reset[:3]) > config['max_translation_from_reset']
             or quaternion_angle(goal[3:], reset[3:]) > config['max_rotation_from_reset']):
@@ -35,6 +45,8 @@ def limit_command(action, previous, actual, reset, dt, config):
     delta = goal[:3]-previous[:3]
     norm = np.linalg.norm(delta)
     position = previous[:3] + delta * min(1., config['max_linear_speed']*dt/max(norm, 1e-12))
+    if hold:
+        position = actual[:3].copy()
     angle = quaternion_angle(previous[3:], goal[3:])
     fraction = min(1., config['max_angular_speed']*dt/max(angle, 1e-12))
     return np.r_[position, interpolate_quaternion(previous[3:], goal[3:], fraction)]

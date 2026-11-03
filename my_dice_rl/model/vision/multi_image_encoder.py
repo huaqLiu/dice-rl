@@ -1,9 +1,11 @@
-"""两路 RGB -> 两个视觉特征；与实际末端位姿、夹爪开度拼接。"""
+"""两路 RGB 与9维末端位姿拼接；10维状态仅用于读取旧模型。"""
 from collections.abc import Mapping
+import copy
 
 import torch
 from torch import nn
 from torchvision.models import ResNet18_Weights, resnet18
+from torchvision import transforms
 
 
 def _replace_batchnorm(module: nn.Module):
@@ -30,29 +32,65 @@ def _resnet18(pretrained: bool):
 class MultiImageEncoder(nn.Module):
     camera_keys = ("camera_wrist", "camera_external")
     pose_dim = 9  # 实际 XYZ + rotation6d；采集文件的四元数要由后续数据集转换。
-    state_dim = 10  # pose_dim + 实际夹爪总开度。
-
-    def __init__(self, image_size: int = 224, pretrained: bool = False):
+    def __init__(self, image_size: int = 224, pretrained: bool = False, state_dim: int = 9,
+                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False):
         super().__init__()
         if image_size < 32:
             raise ValueError("image_size must be at least 32")
         self.image_size = image_size
-        self.backbones = nn.ModuleDict({key: _resnet18(pretrained) for key in self.camera_keys})
-        self.feature_dim = 512 * 2 + self.state_dim  # 每一帧：1034 维。
-        self.register_buffer("image_mean", torch.tensor([.485, .456, .406]).view(1, 3, 1, 1))
-        self.register_buffer("image_std", torch.tensor([.229, .224, .225]).view(1, 3, 1, 1))
+        if isinstance(state_dim, bool) or state_dim not in (9, 10):
+            raise ValueError('state_dim must be 9 (pose) or legacy 10 (pose + gripper)')
+        self.state_dim = state_dim
+        if vision_encoder not in ('resnet18', 'clip_vit_b32'):
+            raise ValueError('vision_encoder must be resnet18 or clip_vit_b32')
+        if not isinstance(frozen_vision, bool) or not isinstance(vision_augment, bool):
+            raise ValueError('frozen_vision and vision_augment must be boolean')
+        self.vision_encoder, self.frozen_vision, self.vision_augment = vision_encoder, frozen_vision, vision_augment
+        if vision_encoder == 'clip_vit_b32':
+            if image_size != 224:
+                raise ValueError('CLIP ViT-B/32 requires 224x224 images')
+            from my_dice_rl.model.vision.clip_encoder import CLIPVisionEncoder
+            base = CLIPVisionEncoder(pretrained)
+            self.visual_feature_dim = base.feature_dim
+            mean, std = base.image_mean, base.image_std
+            # Both cameras start from identical pretrained weights, then learn independently.
+            self.backbones = nn.ModuleDict({self.camera_keys[0]: base, self.camera_keys[1]: copy.deepcopy(base)})
+        else:
+            self.visual_feature_dim = 512
+            mean, std = [.485, .456, .406], [.229, .224, .225]
+            self.backbones = nn.ModuleDict({key: _resnet18(pretrained) for key in self.camera_keys})
+        self.feature_dim = self.visual_feature_dim * 2 + self.state_dim
+        self.register_buffer("image_mean", torch.tensor(mean).view(1, 3, 1, 1))
+        self.register_buffer("image_std", torch.tensor(std).view(1, 3, 1, 1))
+        # Same crop ratio / jitter magnitudes as the original robot config; train only.
+        self.image_augmentation = nn.Sequential(
+            transforms.RandomCrop(int(image_size*.95)),
+            transforms.Resize((image_size, image_size), antialias=True),
+            transforms.ColorJitter(brightness=.3, contrast=.4, saturation=.5, hue=.08))
+        if frozen_vision:
+            self.backbones.requires_grad_(False).eval()
+
+    def train(self, mode=True):
+        super().train(mode)
+        if self.frozen_vision:
+            self.backbones.eval()
+        return self
 
     def forward(self, obs: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        """输入图像 (B, To, 3, 224, 224)，返回逐帧特征 (B, To, 1034)。
+        """输入图像(B, To, 3, 224, 224)，CLIP输出1545维/帧，旧ResNet输出1033维。
 
         RGB 为 [0,1] 浮点数。位姿与开度在进入本编码器前由 DP 模型归一化。
         """
-        pose, gripper = obs["robot_eef_pose"], obs["gripper_width"]
+        pose = obs["robot_eef_pose"]
         if pose.ndim != 3 or pose.shape[-1] != self.pose_dim:
             raise ValueError("robot_eef_pose must have shape (B, To, 9): XYZ + rotation6d")
         batch_size, obs_steps = pose.shape[:2]
-        if gripper.shape != (batch_size, obs_steps, 1):
-            raise ValueError("gripper_width must have shape (B, To, 1)")
+        state = [pose]
+        if self.state_dim == 10:
+            gripper = obs['gripper_width']
+            if gripper.shape != (batch_size, obs_steps, 1):
+                raise ValueError("gripper_width must have shape (B, To, 1)")
+            state.append(gripper)
         features = []
         for key in self.camera_keys:
             image = obs[key]
@@ -60,7 +98,9 @@ class MultiImageEncoder(nn.Module):
             if image.shape != expected or not image.is_floating_point():
                 raise ValueError(f"{key} must be floating RGB [0,1], shape {expected}")
             image = image.reshape(-1, *image.shape[2:])
+            if self.training and self.vision_augment:
+                image = self.image_augmentation(image)
             image = (image - self.image_mean) / self.image_std
             visual = self.backbones[key](image)
-            features.append(visual.reshape(batch_size, obs_steps, 512))
-        return torch.cat([*features, pose, gripper], dim=-1)
+            features.append(visual.reshape(batch_size, obs_steps, self.visual_feature_dim))
+        return torch.cat([*features, *state], dim=-1)

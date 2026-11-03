@@ -99,6 +99,7 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self, config, buffers, demo=False, backend=None):
         super().__init__()
         self.config, self.buffers = config, buffers
+        drag = config.get('collection_mode') == 'kinesthetic'
         self.backend = backend
         self.closing = False
         self.recorder = Recorder(config, buffers, demo)
@@ -124,15 +125,16 @@ class Window(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(22, 18, 22, 18)
-        title = QtWidgets.QLabel("Panda  /  齿轮装配示教采集")
+        title = QtWidgets.QLabel("Panda  /  齿轮装配拖拽示教" if drag else "Panda  /  齿轮装配示教采集")
         title.setObjectName("title")
         layout.addWidget(title)
-        layout.addWidget(QtWidgets.QLabel("齿轮已夹持 → 对准 → 插入  ·  左键启用/暂停  ·  右键切换夹爪" +
+        layout.addWidget(QtWidgets.QLabel(("齿轮已夹持 → 用手引导 → 插入  ·  1启用拖拽，2暂停保持；夹爪保持已有夹持" if drag else
+                         "齿轮已夹持 → 对准 → 插入  ·  左键启用/暂停  ·  右键切换夹爪") +
                          ("    模拟数据保存至 _demo，不会混入真实数据" if demo else "")))
         controls = QtWidgets.QHBoxLayout()
         self.control_buttons = {}
-        for text, shortcut, action in (("启用遥操作", "1", "enable"),
-                                       ("暂停 / 停止复位", "2", "pause"),
+        for text, shortcut, action in ((("启用拖拽" if drag else "启用遥操作"), "1", "enable"),
+                                       (("暂停并保持" if drag else "暂停 / 停止复位"), "2", "pause"),
                                        ("登记当前夹持", "3", "hold"),
                                        ("回到初始位姿", "8", "reset")):
             button = QtWidgets.QPushButton(text + "  " + shortcut)
@@ -144,7 +146,8 @@ class Window(QtWidgets.QMainWindow):
         self.crop_preview.setChecked(True)
         controls.addWidget(self.crop_preview)
         layout.addLayout(controls)
-        layout.addWidget(QtWidgets.QLabel('8：直线复位，不改变夹爪。请先结束录制、退出轴并确认路径畅通；2 / 0 / Esc 可停止。'))
+        layout.addWidget(QtWidgets.QLabel('3登记夹持 → 1拖拽 → 4录制 → 5/6结束；8随机复位，9登记原始位姿，2/0/Esc停止。' if drag else
+            '8：直线复位，不改变夹爪。请先结束录制、退出轴并确认路径畅通；2 / 0 / Esc 可停止。'))
         row = QtWidgets.QHBoxLayout()
         self.previews = {}
         for key, title in (("wrist", "腕部 · D435i"), ("external", "机械臂前方 · Femto Bolt")):
@@ -195,7 +198,8 @@ class Window(QtWidgets.QMainWindow):
         self.status = QtWidgets.QLabel()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        layout.addWidget(QtWidgets.QLabel("结束录制仅结束数据记录；机械臂与夹爪继续由 SpaceMouse 控制。"))
+        layout.addWidget(QtWidgets.QLabel("结束录制后自动请求当前位置保持；复位过程不录入成功示教。" if drag else
+            "结束录制仅结束数据记录；机械臂与夹爪继续由 SpaceMouse 控制。"))
         history_row = QtWidgets.QHBoxLayout()
         history_row.addWidget(QtWidgets.QLabel("历史演示 · 双击回放"))
         refresh = QtWidgets.QPushButton("刷新列表")
@@ -292,6 +296,8 @@ class Window(QtWidgets.QMainWindow):
         health = []
         names = dict(wrist="腕部相机", external="外部相机", eef="末端位姿", target="目标位姿",
                      gripper="夹爪状态", teleop="遥操作", robot="关节状态")
+        if self.config.get('collection_mode') == 'kinesthetic':
+            names['teleop'] = '拖拽控制'
         for key in STREAMS:
             sample = self.buffers.latest(key)
             age = now - sample.received if sample else float("inf")
@@ -341,8 +347,9 @@ class Window(QtWidgets.QMainWindow):
             enabled = '复位中' if state.get('resetting') else ("启用" if state.get('enabled') else "暂停")
             force = np.linalg.norm(state.get('force', [0., 0., 0.]))
             message = state.get('reset_message') or (self.backend.control_message if self.backend else "")
+            control_name = '拖拽' if self.config.get('collection_mode') == 'kinesthetic' else '遥操作'
             self.robot_detail.setText(f"末端 / m：{p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}  "
-                f"夹爪：{grip.value * 1000:.1f} mm  外力：{force:.1f} N  遥操作：{enabled}  {message}")
+                f"夹爪：{grip.value * 1000:.1f} mm  外力：{force:.1f} N  {control_name}：{enabled}  {message}")
 
     def refresh_history(self):
         self.history.clear()
@@ -466,6 +473,7 @@ def main():
     parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1] / 'cfg/collect.yaml'))
     parser.add_argument("--data-root", help="Override output folder")
     parser.add_argument("--demo", action="store_true", help="Local synthetic buffers; no ROS publishers")
+    parser.add_argument("--drag", action="store_true", help="Hand-guided collection with panda_drag_controller")
     parser.add_argument("--smoke-seconds", type=float, default=0, help="Demo-only automated recording test")
     parser.add_argument("--screenshot", help="Optional path for a UI screenshot")
     args = parser.parse_args()
@@ -473,6 +481,9 @@ def main():
         parser.error("--smoke-seconds requires --demo and >=2 seconds")
     with open(args.config) as f:
         config = yaml.safe_load(f)
+    if args.drag:
+        from my_dice_rl.util.drag_config import validate_drag_config
+        validate_drag_config(config)
     root = Path(__file__).resolve().parents[1]
     data_root = Path(args.data_root or config['data_root']).expanduser()
     config['data_root'] = str(data_root if data_root.is_absolute() else root / data_root)
@@ -489,13 +500,20 @@ def main():
         import rclpy
         from rclpy.executors import SingleThreadedExecutor
         from my_dice_rl.env.real.ros_backend import CollectorNode, spin_until_shutdown
+        if args.drag:
+            from my_dice_rl.env.real.drag_backend import DragCollectorNode
+            CollectorNode = DragCollectorNode
         rclpy.init(args=[])
         node = CollectorNode(config, buffers)
         executor = SingleThreadedExecutor()
         executor.add_node(node)
         worker = threading.Thread(target=spin_until_shutdown, args=(executor,), daemon=True)
     worker.start()
-    window = Window(config, buffers, args.demo, node)
+    window_type = Window
+    if args.drag:
+        from my_dice_rl.script.collect_drag_gui import DragWindow
+        window_type = DragWindow
+    window = window_type(config, buffers, args.demo, node)
     window.show()
     if args.screenshot:
         QtCore.QTimer.singleShot(1500, lambda: window.grab().save(args.screenshot))

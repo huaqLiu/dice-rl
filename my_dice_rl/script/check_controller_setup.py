@@ -19,6 +19,7 @@ def main():
         controller = config['controller_name']
         interface = config['controller_command_interface']
         expected = {'panda_cartesian_impedance_controller': 'effort',
+                    'panda_drag_controller': 'effort',
                     'panda_cartesian_position_controller': 'position'}
         if expected.get(controller) != interface:
             raise ValueError('控制器名称与 command interface 不匹配')

@@ -17,7 +17,7 @@ from my_dice_rl.util.config import load_train_config,PROJECT_ROOT
 def test_usr1_finishes_update_and_writes_resumable_checkpoint(collected_episodes,tmp_path):
     dataset=tmp_path/'data.zarr'
     convert_dataset(collected_episodes,dataset,allow_demo=True)
-    config=load_train_config(overrides=['task.allow_demo=true','training.device=cpu',
+    config=load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=['task.allow_demo=true','training.device=cpu',
         'training.num_workers=0','training.epochs=1000','training.batch_size=2',
         'training.use_amp=false','training.checkpoint_every=1','training.max_val_steps=1',
         'model.image_size=32','model.down_dims=[16,32]','model.time_embed_dim=16',

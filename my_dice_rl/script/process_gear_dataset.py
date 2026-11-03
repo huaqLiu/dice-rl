@@ -32,7 +32,7 @@ def _array(file, key, count, tail):
     return value
 
 
-def _episode_values(file, metadata, hold_target_width):
+def _episode_values(file, metadata, hold_target_width, action_dim=9):
     count = metadata['frames']
     config = metadata['config']
     if count < max(2, config.get('min_episode_frames', 2)):
@@ -68,7 +68,9 @@ def _episode_values(file, metadata, hold_target_width):
         raise ValueError('Camera receive-time skew exceeds collection threshold')
     label_width = recorded_target.copy()
     label_width[modes == 0] = hold_target_width
-    action = np.concatenate([pose7_to_pose9(target), label_width], axis=-1).astype(np.float32)
+    action = pose7_to_pose9(target)
+    if action_dim == 10:
+        action = np.concatenate([action, label_width], axis=-1).astype(np.float32)
     for camera in ('wrist', 'external'):
         if f'rgb/{camera}' not in file or len(file[f'rgb/{camera}']) != count:
             raise ValueError(f'Missing/incomplete RGB: {camera}')
@@ -81,8 +83,10 @@ def _episode_values(file, metadata, hold_target_width):
     }
 
 
-def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width=0., task='gear_insertion'):
+def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width=0., task='gear_insertion', action_dim=9):
     source, output = Path(input_path).expanduser().resolve(), Path(output_path).expanduser().resolve()
+    if action_dim not in (9, 10):
+        raise ValueError('action_dim must be 9 or legacy 10')
     if not 0 <= hold_target_width <= .08:
         raise ValueError('hold_target_width must be between 0 and 0.08 m')
     if output.exists():
@@ -133,7 +137,7 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
             trajectory = metadata_path.parent / 'trajectory.h5'
             print('Converting:', trajectory, flush=True)
             with h5py.File(trajectory, 'r') as file:
-                values = _episode_values(file, metadata, hold_target_width)
+                values = _episode_values(file, metadata, hold_target_width, action_dim)
                 count = metadata['frames']
                 for key, value in values.items():
                     if key not in data:
@@ -159,11 +163,13 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
             ends.append(total)
         root.create_dataset('meta/episode_ends', data=np.asarray(ends, dtype=np.int64))
         identity = hashlib.sha256(json.dumps(dict(episodes=manifest, **common,
-                    hold_target_width=hold_target_width), sort_keys=True).encode()).hexdigest()
+                    hold_target_width=hold_target_width, action_dim=action_dim), sort_keys=True).encode()).hexdigest()
         root.attrs.update(**common, schema=DATASET_SCHEMA, complete=True, dataset_id=identity,
             simulated=selected[0][2], task=task, hold_target_width=float(hold_target_width),
             rotation_convention='first two rows of rotation matrix; quaternion XYZW',
-            action_convention='absolute XYZ + rotation6d + total gripper target width (m)',
+            action_dim=action_dim,
+            action_convention=('absolute XYZ + rotation6d; preserve existing grasp' if action_dim == 9 else
+                               'absolute XYZ + rotation6d + total gripper target width (m)'),
             hold_label_policy='mode0 -> configured closed target; recorded width retained separately',
             image_size=224, episodes=manifest,
             created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
@@ -186,9 +192,10 @@ def main():
     parser.add_argument('--task', default='gear_insertion')
     parser.add_argument('--allow-demo', action='store_true')
     parser.add_argument('--hold-target-width', type=float, default=0.)
+    parser.add_argument('--action-dim', type=int, choices=[9, 10], default=9)
     args = parser.parse_args()
     report = convert_dataset(project_path(args.input), project_path(args.output),
-                             args.allow_demo, args.hold_target_width, args.task)
+                             args.allow_demo, args.hold_target_width, args.task, args.action_dim)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

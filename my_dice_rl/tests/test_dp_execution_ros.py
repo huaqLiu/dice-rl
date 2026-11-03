@@ -1,7 +1,10 @@
 """Real ROS messages/actions with fake devices, isolated on DDS domain 187."""
 import time
+import json
 
 import numpy as np
+import pytest
+import yaml
 import rclpy
 from controller_manager_msgs.msg import ControllerState
 from controller_manager_msgs.srv import ListControllers
@@ -17,6 +20,7 @@ from sensor_msgs.msg import Image, JointState, Joy
 from tf2_ros import TransformBroadcaster
 
 from my_dice_rl.agent.eval.dp_executor import DPExecutor
+from my_dice_rl.agent.eval.auto_cycle import AutoCycleExecutor
 from my_dice_rl.agent.eval.dp_policy import DemoPolicy
 from my_dice_rl.env.real.policy_backend import PolicyROSNode
 from my_dice_rl.env.real.policy_observation import ObservationBuffer
@@ -25,7 +29,9 @@ from my_dice_rl.script.rl_collect_gui import load_config
 from my_dice_rl.util.config import PROJECT_ROOT
 
 
-def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
+@pytest.mark.parametrize('executor_class', [DPExecutor, AutoCycleExecutor])
+@pytest.mark.parametrize('action_dim', [9, 10])
+def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path, executor_class, action_dim):
     rclpy.init(domain_id=187, args=['--ros-args', '-r', '__ns:=/policy_test',
         '-r', '/cartesian_impedance_target:=/policy_test/target',
         '-r', '/dice_spacemouse/joy:=/policy_test/joy',
@@ -38,6 +44,9 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
         controller_service='/policy_test/list_controllers',
         teleop_node='/policy_test/dice_spacemouse_teleop',
         teleop_lock_service='/policy_test/dice_spacemouse_teleop/policy_lock')
+    if executor_class is AutoCycleExecutor:
+        config.update(max_translation_from_reset=.5,
+                      auto_cycle=dict(wait_for_training=False, max_episodes=1))
     collector.update(wrist_topic='/policy_test/wrist/image_raw', external_topic='/policy_test/external/image_raw',
         target_topic='/policy_test/target', robot_state_topic='/policy_test/state',
         gripper_topic='/policy_test/gripper/joint_states',
@@ -121,10 +130,13 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
         def predict(self, history):
             self.calls += 1
             actions, noise = super().predict(history)
-            actions[:, 9] = .08 if self.calls <= 3 else 0.
+            if action_dim == 10:
+                actions, noise = np.c_[actions, np.zeros(len(actions))], np.c_[noise, np.zeros(len(noise))]
+                actions[:, 9] = .08 if self.calls <= 3 else 0.
             return actions, noise
 
-    engine = DPExecutor(config, collector, buffer, backend, simulated=True, policy=OpenThenClose())
+    OpenThenClose.action_dim = action_dim
+    engine = executor_class(config, collector, buffer, backend, simulated=True, policy=OpenThenClose())
     fake.create_timer(.02, publish)
     backend.create_timer(.02, engine.tick)
     executor = SingleThreadedExecutor()
@@ -149,9 +161,13 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
         spin_until(lambda: engine.state == 'READY')
         assert teleop._policy_locked and not teleop.enabled
         engine.submit('start')
-        spin_until(lambda: len(gripper_goals) >= 2)
-        assert isinstance(gripper_goals[0], Move.Goal)
-        assert isinstance(gripper_goals[1], Grasp.Goal)
+        if action_dim == 10:
+            spin_until(lambda: len(gripper_goals) >= 2)
+            assert isinstance(gripper_goals[0], Move.Goal)
+            assert isinstance(gripper_goals[1], Grasp.Goal)
+        else:
+            spin_until(lambda: engine.plan_id >= 0 and engine.writer.frames >= 3)
+            assert not gripper_goals
         assert targets
         engine.submit('stop')
         spin_until(lambda: engine.state == 'LABEL')
@@ -167,10 +183,30 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path):
         spin_until(lambda: teleop.enabled and not engine.status()['manual']['busy'])
         engine.submit('stop')
         spin_until(lambda: not teleop.enabled and not engine.status()['manual']['busy'])
+        manual_reference = tmp_path/'manual_reference.yaml'
+        manual_reference.write_text(yaml.safe_dump(dict(reset_base_frame='panda_link0',
+            reset_ee_frame='panda_hand_tcp', reset_position_m=arm['pose'][:3].tolist(),
+            reset_orientation_xyzw=arm['pose'][3:].tolist())))
+        teleop.reset_reference_file = str(manual_reference)
         engine.submit('manual_reset')
         spin_until(lambda: teleop._reset_plan is not None)
         engine.submit('stop')
         spin_until(lambda: teleop._reset_plan is None and not engine.status()['manual']['busy'])
+        if executor_class is AutoCycleExecutor:
+            reference = tmp_path/'automatic_reference.yaml'
+            reference.write_text(yaml.safe_dump(dict(reset_base_frame='panda_link0',
+                reset_ee_frame='panda_hand_tcp', reset_position_m=arm['pose'][:3].tolist(),
+                reset_orientation_xyzw=arm['pose'][3:].tolist())))
+            engine.config['deployment_review'] = str(reference)
+            engine.auto_config['success_z_m'] = float(arm['pose'][2]-.00005)
+            engine.policy = DemoPolicy()
+            goals_before = len(gripper_goals)
+            engine.submit('auto_start', held_confirmed=True)
+            spin_until(lambda: engine.auto_count == 1 and engine.state == 'RESET' and not engine.auto_active, 10.)
+            spin_until(lambda: not teleop._policy_locked)
+            assert backend.publisher is None and len(gripper_goals) == goals_before
+            metadata = json.loads((engine.last_path/'metadata.json').read_text())
+            assert metadata['outcome'] == 'success' and metadata['eligible_for_rl']
     finally:
         engine.submit('close')
         try:

@@ -76,7 +76,7 @@ def render_settings(output):
         '本表自动读取当前文件；重新生成命令：`python -m my_dice_rl.script.report_rl_settings`。', '',
         '先提供正式 DP checkpoint 路径、其对应的专家 Zarr 路径，以及有效 RL 轨迹目录。',
         '填写成功判据、载荷和复位区域后再确认训练/执行数值。填写载荷表不会自动修改 Desk 的载荷设置。', '',
-        '已确定沿用：Franka Panda/Hand、两路 RGB、10 维 XYZ+rotation6d+夹爪动作、人工复位和人工标注。',
+        '已确定沿用：Franka Panda/Hand、两路 RGB、9维 XYZ+rotation6d动作，保持已有夹持。',
         '已确定成功标准：齿轮插入即可，约 15 mm，人工判定；成功奖励 1、失败奖励 0，不要求额外保持时间，容差不设。',
         '策略 RGB 维持原项目的 224×224；基础编码器及归一化继承所选 DP，RL 不重新拟合。',
         '模拟检查中的小网络和宽松时间预算只写在其独立输出目录，不覆盖下列正式配置。', '']

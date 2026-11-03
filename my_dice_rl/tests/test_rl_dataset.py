@@ -14,26 +14,28 @@ from my_dice_rl.util.rotation import pose7_to_pose9
 
 
 def write_episode(root, outcome='success', reason='manual stop', simulated=True, unsafe=False,
-                  x=.4, no_commands=False):
+                  x=.4, no_commands=False, action_dim=10):
     config = dict(task='gear_insertion', max_age_s=.2, max_sensor_skew_s=.08, policy_dt=.1,
                   collector=dict(base_frame='panda_link0', ee_frame='panda_hand_tcp'))
-    writer = RolloutWriter(root, 'gear_insertion', config, dict(simulated=simulated), simulated)
+    writer = RolloutWriter(root, 'gear_insertion', config,
+        dict(simulated=simulated, model_config=dict(action_dim=action_dim)), simulated)
     pose = np.array([x, 0., .3, 0., 0., 0., 1.])
     actions = np.tile(np.r_[pose7_to_pose9(pose), 0.], (4, 1))
     actions[:, 0] += .1  # Raw prediction intentionally differs from bounded published positions.
     actions[1, 9] = .08
+    actions = actions[..., :action_dim]
     rgb = dict(wrist=np.full((224, 224, 3), [200, 20, 10], np.uint8),
                external=np.full((224, 224, 3), [10, 20, 200], np.uint8))
     command_ticks = np.array([] if no_commands else [10.02, 10.04, 10.14, 10.32, 10.34])
     if not no_commands:
         writer.put('plans', dict(tick=np.float64(10.01), latency=np.float64(.02), actions=actions,
-            init_noise=np.arange(40, dtype=np.float32).reshape(4, 10),
+            init_noise=np.arange(4*action_dim, dtype=np.float32).reshape(4, action_dim),
             history_ticks=np.array([9.91, 10.01]), actual_pose=np.tile(pose, (2, 1)),
             actual_gripper=np.array([.035, .035])),
             {key: np.stack([image, image]) for key, image in rgb.items()})
         for i, tick in enumerate(command_ticks):
             plan_id, action_index = (0, i - 1) if i in (1, 2) else (-1, -1)
-            requested = actions[action_index] if plan_id == 0 else np.r_[pose7_to_pose9(pose), 0.]
+            requested = actions[action_index] if plan_id == 0 else np.r_[pose7_to_pose9(pose), 0.][:action_dim]
             command_pose = pose.copy()
             command_pose[0] += i * .001
             writer.put('commands', dict(tick=np.float64(tick), pose=command_pose,
@@ -110,6 +112,19 @@ def test_collation_boundaries_and_spawn_workers(tmp_path):
     assert all(b['obs']['camera_wrist'].shape[1:] == (2, 3, 16, 16) for b in batches)
 
 
+def test_nine_dimensional_rollout_plans_commands_and_online_chunks(tmp_path):
+    from my_dice_rl.agent.dataset.rl_chunks import OnlineChunks
+    path = write_episode(tmp_path, action_dim=9)
+    dataset = RLDataset(path, allow_demo=True, image_size=16)
+    sample = dataset[1]
+    assert sample['action'].shape[-1] == 9
+    assert sample['commands']['requested_action'].shape[-1] == 9
+    assert dataset.get_plan(0, 0)['init_noise'].shape == (4, 9)
+    chunks = OnlineChunks(dataset, 2, 4, .1, .99,
+        dict(success=1., failure=0., timeout=0., step_penalty=0.))
+    assert chunks[0]['action'].shape == (2, 9) and chunks[0]['noise'].shape == (4, 9)
+
+
 @pytest.mark.parametrize('reason,truncated', [('manual stop', False), ('timeout', True)])
 def test_failure_terminal_and_timeout_are_distinct(tmp_path, reason, truncated):
     dataset = RLDataset(write_episode(tmp_path, outcome='failed', reason=reason), allow_demo=True)
@@ -117,6 +132,35 @@ def test_failure_terminal_and_timeout_are_distinct(tmp_path, reason, truncated):
     assert last['reward'].item() == 0.
     assert last['truncated'].item() == truncated
     assert last['terminated'].item() == (not truncated)
+
+
+@pytest.mark.parametrize('limit,gripper_age,camera_age,error', [
+    (.15, .10, .01, None),
+    (.15, .16, .01, 'Stale gripper'),
+    (.15, .10, .11, 'receive-time skew'),
+    (None, .10, .01, 'receive-time skew'),
+    (True, .01, .01, 'Invalid recorded gripper'),
+    (0., .01, .01, 'Invalid recorded gripper'),
+    (float('nan'), .01, .01, 'Invalid recorded gripper'),
+])
+def test_recorded_slow_gripper_budget_matches_execution_without_relaxing_fast_streams(
+        tmp_path, limit, gripper_age, camera_age, error):
+    path = write_episode(tmp_path)
+    metadata_path = path/'metadata.json'
+    metadata = json.loads(metadata_path.read_text())
+    if limit is not None:
+        metadata['config']['max_gripper_age_s'] = limit
+        metadata_path.write_text(json.dumps(metadata))
+    with h5py.File(path/'rollout.h5', 'r+') as file:
+        ticks = file['observations/tick'][:]
+        file['observations/receive/gripper'][:] = ticks-gripper_age
+        file['observations/receive/wrist'][:] = ticks-camera_age
+    if error is not None:
+        with pytest.raises(ValueError, match=error):
+            RLDataset(path, allow_demo=True)
+    else:
+        dataset = RLDataset(path, allow_demo=True)
+        assert len(dataset) == 4 and dataset[-1]['reward'].item() == 1.
 
 
 def test_ineligible_demo_and_partial_filtering(tmp_path):

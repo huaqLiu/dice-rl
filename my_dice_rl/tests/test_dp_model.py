@@ -20,21 +20,20 @@ def example():
                             down_dims=(16, 32), time_embed_dim=16,
                             train_diffusion_steps=8, inference_steps=3)
     states = torch.randn(20, 10)
-    actions = torch.randn(20, 10)
+    actions = torch.randn(20, 9)
     states[:, -1] = torch.linspace(.01, .07, 20)
-    actions[:, -1] = torch.linspace(.0, .08, 20)
-    model.fit_normalizer(states, actions)
+    model.fit_normalizer(states[:, :9], actions)
     obs = {
         'camera_wrist': torch.rand(1, 2, 3, 64, 64),
         'camera_external': torch.rand(1, 2, 3, 64, 64),
-        'robot_eef_pose': states[:2, :9].unsqueeze(0),
+        'robot_eef_pose': states[:2, :9].unsqueeze(0).clone().requires_grad_(True),
         'gripper_width': states[:2, 9:].unsqueeze(0).clone().requires_grad_(True),
     }
     batch = {'obs': obs, 'action': actions[:8].unsqueeze(0)}
     return model, batch
 
 
-def test_loss_reaches_both_cameras_and_gripper_input(example):
+def test_loss_reaches_both_cameras_and_pose_but_not_gripper(example):
     model, batch = example
     model.train()
     loss = model.compute_loss(batch)
@@ -44,22 +43,74 @@ def test_loss_reaches_both_cameras_and_gripper_input(example):
         gradient = model.obs_encoder.backbones[key].conv1.weight.grad
         assert gradient is not None and torch.isfinite(gradient).all()
         assert gradient.abs().sum() > 0
-    assert batch['obs']['gripper_width'].grad.abs().sum() > 0
+    assert batch['obs']['robot_eef_pose'].grad.abs().sum() > 0
+    assert batch['obs']['gripper_width'].grad is None
 
 
-def test_sampling_uses_ten_dimensions_and_checkpoint_keeps_normalizers(example):
+def test_nine_state_features_ignore_gripper_and_allow_omitting_it(example):
     model, batch = example
     model.eval()
-    noise = torch.randn(1, 8, 10)
+    assert model.state_normalizer.feature_dim == 9
+    assert model.obs_encoder.feature_dim == 1033
+    with torch.no_grad():
+        first = model.encode_obs(batch['obs'])
+        changed = {**batch['obs'], 'gripper_width': torch.full((1, 2, 1), float('nan'))}
+        second = model.encode_obs(changed)
+        omitted = {k: v for k, v in batch['obs'].items() if k != 'gripper_width'}
+        third = model.encode_obs(omitted)
+        noise = torch.randn(1, 8, 9)
+        original = model.predict_action(batch['obs'], init_noise=noise)['action_pred']
+        without = model.predict_action(omitted, init_noise=noise)['action_pred']
+    assert first.shape == (1, 2066)
+    torch.testing.assert_close(first, second, rtol=0, atol=0)
+    torch.testing.assert_close(first, third, rtol=0, atol=0)
+    torch.testing.assert_close(original, without, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('state_dim,action_dim', [(9, 9), (9, 10), (10, 10)])
+def test_new_and_legacy_checkpoint_loaders_preserve_actions(tmp_path, state_dim, action_dim):
+    from my_dice_rl.util.checkpoint import atomic_save, load_policy, CHECKPOINT_SCHEMA
+    from my_dice_rl.util.rl_checkpoint import teacher_from_payload
+    config = dict(image_size=32, horizon_steps=4, act_steps=2, down_dims=[16, 32],
+                  time_embed_dim=16, train_diffusion_steps=4, inference_steps=2)
+    model = DiffusionPolicy(**config, state_dim=state_dim, action_dim=action_dim).eval()
+    model.fit_normalizer(torch.randn(16, state_dim), torch.randn(16, action_dim))
+    # Old packages did not record state_dim; new ones must make it explicit.
+    if state_dim == 9:
+        config['state_dim'] = 9
+    if action_dim == 9:
+        config['action_dim'] = 9
+    weights = model.state_dict()
+    path = tmp_path/'policy.pt'
+    atomic_save(path, dict(schema=CHECKPOINT_SCHEMA, model_config=config, model=weights,
+                           ema=dict(model=weights)))
+    loaded, _ = load_policy(path)
+    teacher = teacher_from_payload(dict(model_config=config, model=weights))
+    obs = {key: torch.randn(1, 2, 3, 32, 32) for key in ('camera_wrist', 'camera_external')}
+    obs['robot_eef_pose'] = torch.randn(1, 2, 9)
+    if state_dim == 10:
+        obs['gripper_width'] = torch.zeros(1, 2, 1)
+    noise = torch.randn(1, 4, action_dim)
+    expected = model.predict_action(obs, init_noise=noise)['action_pred']
+    for restored in (loaded, teacher):
+        assert restored.action_dim == action_dim
+        assert restored.state_normalizer.feature_dim == state_dim
+        actual = restored.predict_action(obs, init_noise=noise)['action_pred']
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def test_sampling_uses_nine_dimensions_and_checkpoint_keeps_normalizers(example):
+    model, batch = example
+    model.eval()
+    noise = torch.randn(1, 8, 9)
     first = model.predict_action(batch['obs'], init_noise=noise)
     restored = copy.deepcopy(model)
     restored.state_normalizer.fitted.fill_(False)
     restored.load_state_dict(model.state_dict())
     second = restored.predict_action(batch['obs'], init_noise=noise)
-    assert first['action'].shape == (1, 3, 10)
-    assert first['action_pred'].shape == (1, 8, 10)
+    assert first['action'].shape == (1, 3, 9)
+    assert first['action_pred'].shape == (1, 8, 9)
     assert torch.isfinite(first['action_pred']).all()
-    assert (first['action'][..., -1] >= 0).all() and (first['action'][..., -1] <= .08).all()
     torch.testing.assert_close(first['action_pred'], second['action_pred'])
 
 

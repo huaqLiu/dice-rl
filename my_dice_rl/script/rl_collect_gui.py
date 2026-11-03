@@ -16,6 +16,8 @@ from my_dice_rl.agent.eval.dp_executor import DPExecutor
 from my_dice_rl.agent.eval.dp_policy import DemoPolicy
 from my_dice_rl.env.real.policy_observation import ObservationBuffer
 from my_dice_rl.util.config import PROJECT_ROOT, project_path
+from my_dice_rl.util.auto_cycle_config import auto_cycle_config
+from my_dice_rl.util.orientation_constraint import orientation_config
 from my_dice_rl.script.collect_gui import show_rgb, QtCore, QtGui, QtWidgets
 from my_dice_rl.script.gui_keys import bind_button_keys, install_numeric_editor_filter
 
@@ -49,12 +51,18 @@ def load_config(path):
             raise ValueError('max_gripper_age_s must be positive and finite')
     if config['task'] != collector['task']:
         raise ValueError('Collection and execution task must agree')
+    if config.get('auto_cycle') is not None:
+        config['auto_cycle'] = auto_cycle_config(config['auto_cycle'], config)
+    if config.get('orientation_constraint') is not None:
+        config['orientation_constraint'] = orientation_config(config['orientation_constraint'])
     return config, collector
 
 
 class RLWindow(QtWidgets.QMainWindow):
     names = dict(RESET='待人工复位', LOCKING='交接控制权', READY='已就绪', RUNNING='执行中',
-                 STOPPING='停止中', LABEL='等待人工标注', SAVING='保存中', FAULT='停止未确认：需现场检查')
+                 STOPPING='停止中', LABEL='等待人工标注', SAVING='保存中', FAULT='停止未确认：需现场检查',
+                 AUTO_RETRACT='自动退轴', AUTO_RETURN='自动回起点', AUTO_WAIT='等待RL更新',
+                 AUTO_LABEL='等待自动标注', AUTO_STOPPING='停止自动循环')
 
     def __init__(self, engine, buffer, demo=False):
         super().__init__()
@@ -77,7 +85,9 @@ class RLWindow(QtWidgets.QMainWindow):
         title = QtWidgets.QLabel('Panda / DP 与 RL 策略执行 · 人工复位 · 奖励标注')
         title.setObjectName('title')
         layout.addWidget(title)
-        layout.addWidget(QtWidgets.QLabel('每轮：人工复位 → 3 就绪 → 4 执行；插入完成后立即 2 停止 → 5 保存成功（奖励 1）'))
+        layout.addWidget(QtWidgets.QLabel('手动：3 就绪 → 4 执行 → 2 停止 → 5/6 标注；自动：首次复位确认后按9，2 / 0 / Esc退出循环'
+            if engine.config.get('auto_cycle') is not None else
+            '每轮：人工复位 → 3 就绪 → 4 执行；插入完成后立即 2 停止 → 5 保存成功（奖励 1）'))
         model_row = QtWidgets.QHBoxLayout()
         self.checkpoint = QtWidgets.QLineEdit()
         self.checkpoint.setPlaceholderText('正式 DP .pt、RL 部署包 .pt 或 latest_policy.json；模拟模式可用演示策略')
@@ -123,6 +133,16 @@ class RLWindow(QtWidgets.QMainWindow):
         layout.addWidget(hint)
         self.confirmation = QtWidgets.QCheckBox('我已完成本轮人工复位：齿轮夹稳、工装就位、机械臂处于起始区域')
         layout.addWidget(self.confirmation)
+        auto_row = QtWidgets.QHBoxLayout()
+        threshold_mm = engine.config.get('auto_cycle', {}).get('success_z_m', .06)*1000
+        self.auto_start = QtWidgets.QPushButton(f'启动自动循环 9 · Z<{threshold_mm:g}mm成功')
+        bind_button_keys(self, self.auto_start, '9')
+        self.auto_start.clicked.connect(lambda: self.engine.submit('auto_start', held_confirmed=self.confirmation.isChecked()))
+        auto_row.addWidget(self.auto_start)
+        self.auto_status = QtWidgets.QLabel('首次确认：同一齿轮始终夹持，轴竖直；2 / 0 / Esc 随时停止')
+        self.auto_status.setWordWrap(True)
+        auto_row.addWidget(self.auto_status, 1)
+        layout.addLayout(auto_row)
         controls = QtWidgets.QHBoxLayout()
         self.ready = QtWidgets.QPushButton('复位就绪确认 3')
         bind_button_keys(self, self.ready, '3')
@@ -158,7 +178,9 @@ class RLWindow(QtWidgets.QMainWindow):
         self.path.setWordWrap(True)
         self.path.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         layout.addWidget(self.path)
-        layout.addWidget(QtWidgets.QLabel('停止为软件停止；复位仅由按 8 显式请求。仅标注停止前已实际完成的结果。'))
+        layout.addWidget(QtWidgets.QLabel('9自动循环包含退轴和复位；2 / 0 / Esc停止并退出循环。手动模式仍使用1/8复位、3/4执行、5/6标注。'
+            if engine.config.get('auto_cycle') is not None else
+            '停止为软件停止；复位仅由按 8 显式请求。仅标注停止前已实际完成的结果。'))
         self.history = QtWidgets.QListWidget()
         self.history.setMaximumHeight(100)
         self.history.itemDoubleClicked.connect(self.open_episode)
@@ -184,6 +206,8 @@ class RLWindow(QtWidgets.QMainWindow):
         status = self.engine.status()
         state, now = status['state'], time.monotonic()
         manual = status.get('manual', {})
+        auto = status.get('auto', {})
+        auto_active = auto.get('active', False)
         for key, preview in self.previews.items():
             sample = self.buffer.latest(key)
             if sample is not None:
@@ -207,10 +231,15 @@ class RLWindow(QtWidgets.QMainWindow):
             'SpaceMouse 遥操作已启用' if manual.get('enabled') else
             'SpaceMouse 已暂停' if manual.get('available') else '等待遥操作节点')+
             ' · '+manual.get('message', ''))
-        self.ready.setEnabled(state == 'RESET' and bool(status['model']) and not status['busy'] and not manual_busy and not self.closing)
-        self.start.setEnabled(state == 'READY' and not self.closing)
-        self.stop.setEnabled(state in ('LOCKING', 'READY', 'RUNNING') or manual.get('can_pause', False))
-        self.browse.setEnabled(state == 'RESET' and not status['busy'] and not self.closing)
+        self.ready.setEnabled(state == 'RESET' and bool(status['model']) and not status['busy'] and not manual_busy and not self.closing and not auto_active)
+        self.start.setEnabled(state == 'READY' and not self.closing and not auto_active)
+        self.stop.setEnabled(state in ('LOCKING', 'READY', 'RUNNING') or state.startswith('AUTO_') or manual.get('can_pause', False))
+        self.browse.setEnabled(state == 'RESET' and not status['busy'] and not self.closing and not auto_active)
+        self.auto_start.setEnabled(auto.get('available', False) and state == 'RESET' and bool(status['model'])
+            and not status['busy'] and not manual_busy and not self.closing and not auto_active)
+        if auto.get('available'):
+            self.auto_status.setText(f'自动循环 {auto.get("episodes", 0)}/{auto.get("max_episodes", 0)} · '
+                f'{auto.get("phase", "idle")} · 保持夹持，沿+Z退轴；2 / 0 / Esc停止')
         self.confirmation.setEnabled(state == 'RESET' and not manual_busy and not self.closing)
         for button in self.label_buttons:
             button.setEnabled(state == 'LABEL' and status['frames'] >= 2)
@@ -287,7 +316,11 @@ def main():
         rclpy.init(args=[])
         node = PolicyROSNode(collector, config, buffer)
         backend = node
-    engine = DPExecutor(config, collector, buffer, backend, args.demo, DemoPolicy() if args.demo else None)
+    executor_class = DPExecutor
+    if config.get('auto_cycle') is not None:
+        from my_dice_rl.agent.eval.auto_cycle import AutoCycleExecutor
+        executor_class = AutoCycleExecutor
+    engine = executor_class(config, collector, buffer, backend, args.demo, DemoPolicy() if args.demo else None)
     if args.demo:
         def control_loop():
             while not stop_event.is_set():

@@ -67,7 +67,7 @@ class HybridReplayBuffer:
         if values['features'].ndim != 2 or values['next_features'].shape != values['features'].shape:
             raise ValueError('Replay feature shapes disagree')
         shape = values['action'].shape
-        if len(shape) != 3 or shape[-1] != 10 or values['mask'].shape != shape[:2] or values['duration'].shape != shape[:2]:
+        if len(shape) != 3 or shape[-1] not in (9, 10) or values['mask'].shape != shape[:2] or values['duration'].shape != shape[:2]:
             raise ValueError('Replay action/mask/duration shapes disagree')
         for key in ('reward', 'discount', 'terminated', 'truncated', 'dt', 'noise_valid'):
             if values[key].shape != (count, 1):
@@ -75,7 +75,7 @@ class HybridReplayBuffer:
         for key in ('mask', 'terminated', 'truncated', 'noise_valid'):
             if values[key].dtype != np.bool_:
                 raise ValueError('Replay flags must be boolean: ' + key)
-        if (values['noise'].ndim != 3 or values['noise'].shape[-1] != 10
+        if (values['noise'].ndim != 3 or values['noise'].shape[-1] != shape[-1]
                 or np.any(values['dt'] <= 0) or np.any(values['duration'] < 0)
                 or np.any(values['duration'][~values['mask']] != 0)
                 or np.any(values['terminated'] & values['truncated'])):

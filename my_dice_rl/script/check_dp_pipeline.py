@@ -28,10 +28,10 @@ def check_pipeline(config, checkpoint=None, output=None):
         cfg = model_config(config)
         model = DiffusionPolicy(**cfg)
         image_size = cfg['image_size']
-    train, validation = make_datasets(config['task'], image_size)
+    train, validation = make_datasets(config['task'], image_size, model.action_dim)
     dataset = validation if len(validation) else train
     if not checkpoint:
-        model.fit_normalizer(*train.normalizer_data())
+        model.fit_normalizer(*train.normalizer_data(model.state_normalizer.feature_dim))
         model.to(device)
     batch = move_to_device(next(iter(DataLoader(dataset, batch_size=1, shuffle=False))), device)
     torch.manual_seed(config['training']['seed'])
@@ -50,8 +50,9 @@ def check_pipeline(config, checkpoint=None, output=None):
     reference = batch['action'][0].cpu().numpy()
     valid = batch['valid_mask'][0].cpu().numpy()
     predicted, target = prediction[valid], reference[valid]
-    metrics = dict(position_rmse_m=float(np.sqrt(np.mean((predicted[:, :3]-target[:, :3])**2))),
-                   gripper_rmse_m=float(np.sqrt(np.mean((predicted[:, 9]-target[:, 9])**2))))
+    metrics = dict(position_rmse_m=float(np.sqrt(np.mean((predicted[:, :3]-target[:, :3])**2))))
+    if model.action_dim == 10:
+        metrics['gripper_rmse_m'] = float(np.sqrt(np.mean((predicted[:, 9]-target[:, 9])**2)))
     try:
         rotation = rotation6d_to_matrix(predicted[:, 3:9])
         desired = rotation6d_to_matrix(target[:, 3:9])

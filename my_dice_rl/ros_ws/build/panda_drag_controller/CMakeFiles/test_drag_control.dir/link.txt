@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/test_drag_control.dir/test/test_drag_control.cpp.o -o test_drag_control  gtest/libgtest_main.a gtest/libgtest.a -pthread 

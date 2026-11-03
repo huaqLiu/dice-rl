@@ -1,0 +1,5 @@
+# 拖拽复位固定原点；TCP Z轴沿基坐标-Z，保留原姿态绕竖直轴转角。按9可重新登记。
+reset_base_frame: panda_link0
+reset_ee_frame: panda_hand_tcp
+reset_position_m: [0.6093991413180097, 0.00001, 0.13452121952955118]
+reset_orientation_xyzw: [0.9997895819981202, -0.02051320862332876, 0.0, 0.0]

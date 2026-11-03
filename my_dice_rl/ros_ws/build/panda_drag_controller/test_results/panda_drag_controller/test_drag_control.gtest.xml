@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="0" disabled="0" errors="0" time="0" timestamp="2026-11-02T16:00:59" name="AllTests">
+  <testsuite name="DragControl" tests="4" failures="0" disabled="0" errors="0" time="0" timestamp="2026-11-02T16:00:59">
+    <testcase name="StartsHoldingAndIgnoresOldCartesianGoals" status="run" result="completed" time="0" timestamp="2026-11-02T16:00:59" classname="panda_drag_controller.DragControl" />
+    <testcase name="DragOnlyDampsVelocityAndPauseCapturesCurrentJointPositions" status="run" result="completed" time="0" timestamp="2026-11-02T16:00:59" classname="panda_drag_controller.DragControl" />
+    <testcase name="LostHeartbeatAndOverspeedSwitchToHold" status="run" result="completed" time="0" timestamp="2026-11-02T16:00:59" classname="panda_drag_controller.DragControl" />
+    <testcase name="TorqueIsBoundedAndRateLimited" status="run" result="completed" time="0" timestamp="2026-11-02T16:00:59" classname="panda_drag_controller.DragControl" />
+  </testsuite>
+</testsuites>

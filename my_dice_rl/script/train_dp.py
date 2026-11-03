@@ -7,7 +7,7 @@ import signal
 import threading
 
 from my_dice_rl.agent.pretrain.train_dp_agent import TrainDPAgent
-from my_dice_rl.util.config import DEFAULT_TRAIN_CONFIG, load_train_config
+from my_dice_rl.util.config import DEFAULT_TRAIN_CONFIG, load_train_config, project_path
 from my_dice_rl.util.rl_coordination import DeviceLease
 
 
@@ -28,6 +28,10 @@ def main():
     parser.add_argument('--set', nargs='*', default=[], metavar='KEY=VALUE')
     parser.add_argument('--result', help='Optional atomic JSON completion/pause result')
     args = parser.parse_args()
+    if args.resume:
+        args.resume = str(project_path(args.resume))
+    if args.config:
+        args.config = str(project_path(args.config))
     path = (args.config or (Path(args.resume).resolve().parent.parent / 'config.yaml'
                            if args.resume else DEFAULT_TRAIN_CONFIG))
     config = load_train_config(path, args.set)
@@ -50,6 +54,7 @@ def main():
             run_dir=str(output), training_complete=agent.training_complete,
             global_step=agent.global_step, epoch=agent.epoch, batch_in_epoch=agent.batch_in_epoch,
             best_checkpoint=str(output/'checkpoint/best.pt'), last_checkpoint=str(output/'checkpoint/last.pt'))
+        result['stop_reason'] = agent.stop_reason
         write_result(args.result, result)
         print('Training output:', output)
         print(json.dumps(result), flush=True)

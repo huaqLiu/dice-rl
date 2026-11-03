@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="1" failures="0" disabled="0" errors="0" time="0.504" timestamp="2026-11-02T16:00:59" name="AllTests">
+  <testsuite name="DragController" tests="1" failures="0" disabled="0" errors="0" time="0.504" timestamp="2026-11-02T16:00:59">
+    <testcase name="RealServicesAndLoanedInterfacesWithoutRobot" status="run" result="completed" time="0.504" timestamp="2026-11-02T16:00:59" classname="panda_drag_controller.DragController" />
+  </testsuite>
+</testsuites>

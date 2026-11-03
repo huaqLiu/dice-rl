@@ -164,6 +164,10 @@ class EpisodeWriter:
             image_transform="RGB; resize to fill then center crop (DICE-RL-Robot); raw JPEG retained separately",
             synchronization="latest received sample <= fixed host monotonic tick; source stamps retained; no exposure synchronization guarantee",
         )
+        if config.get('action_source') == 'measured_eef_pose':
+            self.metadata['action_convention'] = (
+                'kinesthetic teaching: target_eef_pose is measured robot_eef_pose, not a controller command; '
+                'absolute XYZW; gripper_mode=0 preserves existing grasp')
         atomic_json(path / "metadata.json", self.metadata)
         self.file = h5py.File(path / "trajectory.partial.h5", "w")
         self.file.attrs["schema"] = SCHEMA
@@ -183,6 +187,10 @@ class EpisodeWriter:
 
     def append(self, tick, samples, wall_timestamp=None):
         started = time.monotonic()
+        if self.config.get('action_source') == 'measured_eef_pose':
+            # Kinesthetic teaching has no commanded pose. Keep exact pose/timestamp
+            # identity even if the GUI snapshots between two buffer updates.
+            samples = {**samples, 'target': samples['eef']}
         values = {
             "timestamp": np.float64(tick),
             "wall_timestamp": np.float64(time.time() if wall_timestamp is None else wall_timestamp),

@@ -13,7 +13,7 @@ max_gripper_age_s: 0.15
 control_timeout_s: 0.15
 max_inference_latency_s: 1.0
 max_plan_age_s: 0.70
-max_episode_s: 30.0
+max_episode_s: 60.0
 min_free_gb: 5.0
 controller_name: panda_cartesian_impedance_controller
 controller_command_interface: effort

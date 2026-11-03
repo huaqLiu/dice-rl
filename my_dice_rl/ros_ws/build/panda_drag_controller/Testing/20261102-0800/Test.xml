@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Site BuildName="(empty)"
+	BuildStamp="20261102-0800-Experimental"
+	Name="AIUS"
+	Generator="ctest-3.22.1"
+	CompilerName="/usr/bin/c++"
+	CompilerVersion="11.4.0"
+	OSName="Linux"
+	Hostname="AIUS"
+	OSRelease="5.15.0-1078-realtime"
+	OSVersion="#86-Ubuntu SMP PREEMPT_RT Fri Jan 24 20:20:54 UTC 2025"
+	OSPlatform="x86_64"
+	Is64Bits="1"
+	VendorString="AuthenticAMD"
+	VendorID="Advanced Micro Devices"
+	FamilyID="25"
+	ModelID="97"
+	ProcessorCacheSize="1024"
+	NumberOfLogicalCPU="32"
+	NumberOfPhysicalCPU="16"
+	TotalVirtualMemory="62499"
+	TotalPhysicalMemory="63424"
+	LogicalProcessorsPerPhysical="2"
+	ProcessorClockFrequency="3000"
+	>
+	<Testing>
+		<StartDateTime>Nov 02 16:00 CST</StartDateTime>
+		<StartTestTime>1793606459</StartTestTime>
+		<TestList>
+			<Test>./test_drag_control</Test>
+			<Test>./test_drag_controller</Test>
+		</TestList>
+		<Test Status="passed">
+			<Name>test_drag_control</Name>
+			<Path>.</Path>
+			<FullName>./test_drag_control</FullName>
+			<FullCommandLine>/usr/bin/python3 "-u" "/opt/ros/humble/share/ament_cmake_test/cmake/run_test.py" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml" "--package-name" "panda_drag_controller" "--output-file" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/ament_cmake_gtest/test_drag_control.txt" "--command" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_control" "--gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml"</FullCommandLine>
+			<Results>
+				<NamedMeasurement type="numeric/double" name="Execution Time">
+					<Value>0.0531278</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="numeric/double" name="Processors">
+					<Value>1</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Completion Status">
+					<Value>Completed</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Command Line">
+					<Value>/usr/bin/python3 "-u" "/opt/ros/humble/share/ament_cmake_test/cmake/run_test.py" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml" "--package-name" "panda_drag_controller" "--output-file" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/ament_cmake_gtest/test_drag_control.txt" "--command" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_control" "--gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml"</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Environment">
+					<Value>#CTEST_RESOURCE_GROUP_COUNT=</Value>
+				</NamedMeasurement>
+				<Measurement>
+					<Value>-- run_test.py: invoking following command in '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller':
+ - /home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_control --gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml
+Running main() from /opt/ros/humble/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from DragControl
+[ RUN      ] DragControl.StartsHoldingAndIgnoresOldCartesianGoals
+[       OK ] DragControl.StartsHoldingAndIgnoresOldCartesianGoals (0 ms)
+[ RUN      ] DragControl.DragOnlyDampsVelocityAndPauseCapturesCurrentJointPositions
+[       OK ] DragControl.DragOnlyDampsVelocityAndPauseCapturesCurrentJointPositions (0 ms)
+[ RUN      ] DragControl.LostHeartbeatAndOverspeedSwitchToHold
+[       OK ] DragControl.LostHeartbeatAndOverspeedSwitchToHold (0 ms)
+[ RUN      ] DragControl.TorqueIsBoundedAndRateLimited
+[       OK ] DragControl.TorqueIsBoundedAndRateLimited (0 ms)
+[----------] 4 tests from DragControl (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 4 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml'
+-- run_test.py: verify result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_control.gtest.xml'
+</Value>
+				</Measurement>
+			</Results>
+			<Labels>
+				<Label>gtest</Label>
+			</Labels>
+		</Test>
+		<Test Status="passed">
+			<Name>test_drag_controller</Name>
+			<Path>.</Path>
+			<FullName>./test_drag_controller</FullName>
+			<FullCommandLine>/usr/bin/python3 "-u" "/opt/ros/humble/share/ament_cmake_test/cmake/run_test.py" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml" "--package-name" "panda_drag_controller" "--output-file" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/ament_cmake_gtest/test_drag_controller.txt" "--command" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_controller" "--gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml"</FullCommandLine>
+			<Results>
+				<NamedMeasurement type="numeric/double" name="Execution Time">
+					<Value>0.669303</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="numeric/double" name="Processors">
+					<Value>1</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Completion Status">
+					<Value>Completed</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Command Line">
+					<Value>/usr/bin/python3 "-u" "/opt/ros/humble/share/ament_cmake_test/cmake/run_test.py" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml" "--package-name" "panda_drag_controller" "--output-file" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/ament_cmake_gtest/test_drag_controller.txt" "--command" "/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_controller" "--gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml"</Value>
+				</NamedMeasurement>
+				<NamedMeasurement type="text/string" name="Environment">
+					<Value>ROS_DOMAIN_ID=187
+#CTEST_RESOURCE_GROUP_COUNT=</Value>
+				</NamedMeasurement>
+				<Measurement>
+					<Value>-- run_test.py: invoking following command in '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller':
+ - /home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_drag_controller --gtest_output=xml:/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml
+Running main() from /opt/ros/humble/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DragController
+[ RUN      ] DragController.RealServicesAndLoanedInterfacesWithoutRobot
+[       OK ] DragController.RealServicesAndLoanedInterfacesWithoutRobot (504 ms)
+[----------] 1 test from DragController (504 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (504 ms total)
+[  PASSED  ] 1 test.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml'
+-- run_test.py: verify result file '/home/lhq/dice-rl/my_dice_rl/ros_ws/build/panda_drag_controller/test_results/panda_drag_controller/test_drag_controller.gtest.xml'
+</Value>
+				</Measurement>
+			</Results>
+			<Labels>
+				<Label>gtest</Label>
+			</Labels>
+		</Test>
+		<EndDateTime>Nov 02 16:01 CST</EndDateTime>
+		<EndTestTime>1793606460</EndTestTime>
+		<ElapsedMinutes>0</ElapsedMinutes>
+	</Testing>
+</Site>

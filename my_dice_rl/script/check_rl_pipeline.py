@@ -106,7 +106,7 @@ def check_pipeline(output, device='cpu'):
     raw, dataset = output / '_demo/raw', output / '_demo/expert.zarr'
     synthetic_demonstrations(raw)
     convert_dataset(raw, dataset, allow_demo=True)
-    config = load_train_config(overrides=['task.allow_demo=true', 'task.horizon_steps=8', 'task.act_steps=2',
+    config = load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=['task.allow_demo=true', 'task.horizon_steps=8', 'task.act_steps=2',
         'training.device=' + device, 'training.num_workers=0', 'training.batch_size=2', 'training.epochs=1',
         'training.max_train_steps=1', 'training.max_val_steps=1', 'training.warmup_steps=0',
         'model.image_size=32', 'model.down_dims=[16,32]', 'model.time_embed_dim=16',
@@ -144,11 +144,13 @@ def check_pipeline(output, device='cpu'):
     policy = load_execution_policy(index_path, device, collector, real=False)
     # 部署模型和 learner 对相同特征/噪声必须输出相同动作。
     batch = learner.replay.sample(2, device)
-    noise = torch.randn(2, learner.model.horizon, 10, device=device)
+    noise = torch.randn(2, learner.model.horizon, learner.model.action_dim, device=device)
     with torch.no_grad():
-        trained, base = learner.model.action(batch['features'], noise)
-        corrected = (base + policy.model.actor(batch['features'], noise).masked_fill(
-            policy.model.action_normalizer.constant, 0.)).clamp(-1, 1)
+        trained, _ = learner.model.action(batch['features'], noise)
+        physical = policy.model.predict_action_from_features(batch['features'], noise)['action_pred']
+        corrected = policy.model.action_normalizer.normalize(physical)
+        # 夹爪部署时会额外裁剪至物理行程；此处验证位姿9维完全一致。
+        trained, corrected = trained[..., :9], corrected[..., :9]
     torch.testing.assert_close(trained, corrected)
     try:
         load_execution_policy(index_path, device, collector, real=True, execution={})

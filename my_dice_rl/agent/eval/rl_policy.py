@@ -50,9 +50,10 @@ class RLCheckpointPolicy(CheckpointPolicy):
         self._configure(teacher['task'], teacher['model_config'], device, collector, real)
         self.identity = dict(path=self.path, weights='residual_actor', global_step=state['global_step'],
             dataset_id=teacher['dataset_id'], task=teacher['task'],
-            model_config={**teacher['model_config'], 'act_steps': self.act_steps},
+            model_config={**teacher['model_config'], 'act_steps': self.act_steps, 'action_dim': self.action_dim},
             teacher_sha256=teacher['sha256'], sha256=file_digest(self.path), simulated=state['simulated'],
-            algorithm=state['algorithm'])
+            algorithm=state['algorithm'], trained_rollouts=list(state.get('data_manifest', {}).get('online', {})),
+            training_round_complete=state['global_step'] >= state.get('round_stop', state['global_step']))
         self._warmup()
 
 

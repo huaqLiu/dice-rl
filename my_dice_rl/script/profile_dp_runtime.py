@@ -55,15 +55,17 @@ def profile(checkpoint,output,device='cuda:0',windows=10):
             action,noise=policy.predict(history)
             latencies.append((time.monotonic()-started)*1000)
             finite &= bool(np.isfinite(action).all() and np.isfinite(noise).all())
-            gripper_min=min(gripper_min,float(action[:,9].min()))
-            gripper_max=max(gripper_max,float(action[:,9].max()))
+            if policy.action_dim == 10:
+                gripper_min=min(gripper_min,float(action[:,9].min()))
+                gripper_max=max(gripper_max,float(action[:,9].max()))
         report=dict(schema='dice_dp_runtime_profile_v1',checkpoint=str(Path(checkpoint).resolve()),
             dataset_id=policy.identity['dataset_id'],simulated=bool(root.attrs['simulated']),device=device,
             load_and_warmup_ms=warmup_ms,windows=windows,
             latency_ms=dict(mean=float(np.mean(latencies)),p95=float(np.percentile(latencies,95)),max=max(latencies)),
             configured_inference_budget_ms=execution['max_inference_latency_s']*1000,
             all_within_budget=max(latencies)<=execution['max_inference_latency_s']*1000,
-            finite_actions=finite,gripper_prediction_range_m=[gripper_min,gripper_max],
+            action_dim=policy.action_dim, finite_actions=finite,
+            gripper_prediction_range_m=[gripper_min,gripper_max] if policy.action_dim == 10 else None,
             gpu_before=availability,robot_commands_sent=False,
             note='Saved-observation timing through the actual DP execution predictor; not closed-loop robot validation.')
         path=Path(output).resolve();path.parent.mkdir(parents=True,exist_ok=True)

@@ -28,7 +28,7 @@ def _load_worker(path, device, collector, real, execution, loader):
                     inference_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     return dict(path=_policy.path, identity=identity, obs_steps=_policy.obs_steps,
                 dt=_policy.dt, horizon=_policy.horizon, act_steps=_policy.act_steps,
-                image_size=getattr(_policy, 'image_size', 224))
+                image_size=getattr(_policy, 'image_size', 224), action_dim=getattr(_policy, 'action_dim', 9))
 
 
 def _predict_worker(history, submitted):

@@ -54,7 +54,7 @@ def test_exact_resume_and_mismatched_settings(pipeline):
 
 def test_export_is_self_contained_and_rejects_drafts_and_wrong_index(pipeline, tmp_path):
     run = Path(pipeline['rl_run'])
-    with pytest.raises(ValueError, match='统一确认'):
+    with pytest.raises(ValueError, match='统一确认|模拟/未训练'):
         export_rl_policy(run / 'checkpoint/last.pt', tmp_path / 'formal.pt')
     output = export_rl_policy(run / 'checkpoint/last.pt', tmp_path / 'draft.pt', allow_draft=True)
     payload = torch.load(output, map_location='cpu', weights_only=False)
@@ -97,3 +97,19 @@ def test_reviewed_formal_loader_checks_runtime_limits(pipeline, tmp_path):
     execution['max_force'] += 1
     with pytest.raises(ValueError, match='不一致'):
         load_execution_policy(exported, 'cpu', collector, real=True, execution=execution)
+
+
+def test_export_can_select_new_execution_config_without_changing_checkpoint(pipeline, tmp_path):
+    checkpoint = Path(pipeline['rl_run']) / 'checkpoint/last.pt'
+    before = file_digest(checkpoint)
+    state = load_rl_checkpoint(checkpoint)
+    execution = yaml.safe_load(Path(state['config']['execution_config']).read_text())
+    execution['max_force'] += 1
+    override = tmp_path / 'execution.yaml'
+    override.write_text(yaml.safe_dump(execution))
+    output = export_rl_policy(checkpoint, tmp_path / 'updated.pt', allow_draft=True,
+                              execution_config=override)
+    payload = torch.load(output, map_location='cpu', weights_only=False)
+    assert payload['execution_limits'] == execution_limits(execution)
+    assert payload['global_step'] == state['global_step']
+    assert file_digest(checkpoint) == before

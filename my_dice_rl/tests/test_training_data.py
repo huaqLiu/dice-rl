@@ -49,19 +49,20 @@ def test_export_gripper_modes_and_no_validation_leakage(collected_episodes, tmp_
     train = GearDataset(output, episode_ids=train_ids, horizon_steps=8, allow_demo=True)
     validation = GearDataset(output, episode_ids=val_ids, horizon_steps=8, allow_demo=True)
     states, actions = train.normalizer_data()
-    normalizer = FeatureNormalizer(10)
+    normalizer = FeatureNormalizer(9)
+    assert states.shape[-1] == 9 and actions.shape[-1] == 9
     normalizer.fit(states)
     assert float(states[:, 0].max()) < .6
     assert float(validation[0]['obs']['robot_eef_pose'][-1, 0]) > .89
     assert float(normalizer.center[0]) < .6
     sample = train[0]
     assert sample['obs']['camera_wrist'].shape == (2, 3, 224, 224)
-    assert sample['action'].shape == (8, 10)
+    assert sample['action'].shape == (8, 9)
     assert sample['obs']['camera_wrist'][:, 0].mean() > .65
-    assert float(sample['action'][0, -1]) == 0.  # Registered hold -> closed label.
+    assert sample['action'].shape[-1] == 9  # Pose only: no gripper label.
     assert float(sample['obs']['gripper_width'][0, 0]) == pytest.approx(.035)
     assert float(train.root['data/gripper_recorded_target_width'][0, 0]) == pytest.approx(.035)
-    assert float(actions[:, -1].max()) == pytest.approx(.08)
+    assert train.root['data/action'].shape[-1] == 9
     with pytest.raises(FileExistsError):
         convert_dataset(collected_episodes, output, allow_demo=True)
 
@@ -76,3 +77,18 @@ def test_corrupt_successful_trajectory_is_rejected_atomically(collected_episodes
         convert_dataset(collected_episodes, output, allow_demo=True)
     assert not output.exists()
     assert not list(tmp_path.glob('broken.zarr.partial-*'))
+
+
+def test_existing_ten_dimensional_dataset_can_supply_pose_only_labels(collected_episodes, tmp_path):
+    path = tmp_path/'legacy.zarr'
+    convert_dataset(collected_episodes, path, allow_demo=True, action_dim=10)
+    dataset = GearDataset(path, horizon_steps=8, allow_demo=True)
+    assert dataset.root['data/action'].shape[-1] == 10  # Original store stays unchanged.
+    sample = dataset[0]
+    assert sample['action'].shape == (8, 9)
+    _, _, _, indices, _ = dataset.sampler[0]
+    np.testing.assert_array_equal(sample['action'], dataset.read('action', indices)[..., :9])
+    states, actions = dataset.normalizer_data()
+    assert states.shape[-1] == actions.shape[-1] == 9
+    legacy = GearDataset(path, horizon_steps=8, allow_demo=True, action_dim=10)
+    assert legacy[0]['action'].shape[-1] == 10

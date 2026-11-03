@@ -26,20 +26,20 @@ class TinyTeacher(nn.Module):
         self.obs_steps, self.horizon_steps = 1, 4
         self.obs_encoder = nn.Identity()
         self.obs_encoder.feature_dim = 4
-        self.mapping = nn.Linear(4, 40)
-        self.action_normalizer = FeatureNormalizer(10)
-        self.action_normalizer.fit(torch.tensor([[-1.] * 10, [1.] * 10]))
+        self.mapping = nn.Linear(4, 36)
+        self.action_normalizer = FeatureNormalizer(9)
+        self.action_normalizer.fit(torch.tensor([[-1.] * 9, [1.] * 9]))
 
     def predict_action_from_features(self, feature, init_noise):
-        return dict(action_pred=(self.mapping(feature).reshape(-1, 4, 10) * .1 + init_noise * .05).tanh())
+        return dict(action_pred=(self.mapping(feature).reshape(-1, 4, 9) * .1 + init_noise * .05).tanh())
 
 
 def mini_batch(count=4):
     return dict(features=torch.randn(count, 4), next_features=torch.randn(count, 4),
-        action=torch.randn(count, 2, 10), mask=torch.ones(count, 2, dtype=torch.bool),
+        action=torch.randn(count, 2, 9), mask=torch.ones(count, 2, dtype=torch.bool),
         duration=torch.ones(count, 2), reward=torch.ones(count, 1), discount=torch.full((count, 1), .99),
         terminated=torch.zeros(count, 1, dtype=torch.bool), truncated=torch.zeros(count, 1, dtype=torch.bool),
-        dt=torch.full((count, 1), .2), noise=torch.randn(count, 4, 10),
+        dt=torch.full((count, 1), .2), noise=torch.randn(count, 4, 9),
         noise_valid=torch.ones(count, 1, dtype=torch.bool))
 
 
@@ -49,7 +49,7 @@ def test_residual_initialization_gradients_targets_and_constant_dimension():
     model = DistillRL(TinyTeacher(), config)
     batch = mini_batch()
     batch['expert'] = torch.tensor([[True], [False], [True], [False]])
-    noise = torch.randn(4, 4, 10)
+    noise = torch.randn(4, 4, 9)
     action, base = model.action(batch['features'], noise)
     torch.testing.assert_close(action, base, rtol=0, atol=0)
     before = {key: value.clone() for key, value in model.teacher.state_dict().items()}
@@ -85,7 +85,7 @@ def test_chunk_reconstruction_and_expert_boundaries(tmp_path, collected_episodes
     path = write_episode(tmp_path / 'online')
     raw = RLDataset(path, allow_demo=True, image_size=32)
     reward = dict(success=1., failure=0., timeout=0., step_penalty=0.)
-    data = OnlineChunks(raw, 3, 4, .1, .9, reward, stride=1)
+    data = OnlineChunks(raw, 3, 4, .1, .9, reward, stride=1, action_dim=10)
     sample = data[0]
     # 使用区间中点的实际目标，并非 plans/actions 中的 0.5m 原预测。
     np.testing.assert_allclose(sample['action'][:, 0], [.401, .402, .402])
@@ -96,7 +96,7 @@ def test_chunk_reconstruction_and_expert_boundaries(tmp_path, collected_episodes
     import h5py
     with h5py.File(path / 'rollout.h5', 'r+') as file:
         file['commands/tick'][2] = 10.2  # 新指令刚好在区间结束处，不能当成此前已执行。
-    boundary = OnlineChunks(RLDataset(path, allow_demo=True, image_size=32), 3, 4, .1, .9, reward)
+    boundary = OnlineChunks(RLDataset(path, allow_demo=True, image_size=32), 3, 4, .1, .9, reward, action_dim=10)
     assert boundary[0]['action'][1, 0].item() == pytest.approx(.401)
     output = tmp_path / 'expert.zarr'
     convert_dataset(collected_episodes, output, allow_demo=True)
@@ -134,7 +134,7 @@ def test_replay_mixture_fifo_restore_and_validation():
         if invalid == 'nan':
             bad['features'][0, 0] = float('nan')
         elif invalid == 'shape':
-            bad['action'] = bad['action'][:, :, :9]
+            bad['action'] = bad['action'][:, :, :8]
         else:
             bad['terminated'][0] = bad['truncated'][0] = True
         with pytest.raises(ValueError):
@@ -169,7 +169,7 @@ def test_device_lease_excludes_other_process(tmp_path):
 def test_config_draft_and_invalid_settings():
     config = load_rl_config(require_paths=False)
     with pytest.raises(ValueError, match='统一确认'):
-        require_review(config['review'])
+        require_review({**config['review'], 'confirmed': False})
     for override in ['training.gamma=1.2', 'training.gamma=true', 'training.batch_size=0', 'model.residual_limit=[0.1]',
                      'model.target_subset=99', 'model.td_loss=invalid', 'data.allow_demo=1']:
         with pytest.raises(ValueError):

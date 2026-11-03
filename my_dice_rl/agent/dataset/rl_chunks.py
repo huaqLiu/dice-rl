@@ -32,7 +32,7 @@ def pack(obs, next_obs, action, durations, reward, discount, terminated, truncat
         reward=torch.tensor([reward], dtype=torch.float32), discount=torch.tensor([discount], dtype=torch.float32),
         terminated=torch.tensor([bool(terminated)]), truncated=torch.tensor([bool(truncated)]),
         dt=torch.tensor([float(np.sum(durations))], dtype=torch.float32),
-        noise=torch.zeros(horizon, 10) if noise is None else torch.as_tensor(noise, dtype=torch.float32),
+        noise=torch.zeros(horizon, action.shape[-1]) if noise is None else torch.as_tensor(noise, dtype=torch.float32),
         noise_valid=torch.tensor([noise_valid]))
 
 
@@ -42,8 +42,9 @@ class OnlineChunks(Dataset):
     这是对 50 Hz 控制目标的 10 Hz 重采样，不能还原区间内全部连续动力学；
     原始指令及预测仍保存在 rollout.h5，RLDataset 可用于审计。
     """
-    def __init__(self, dataset, chunk_steps, horizon, policy_dt, gamma, reward, stride=1):
+    def __init__(self, dataset, chunk_steps, horizon, policy_dt, gamma, reward, stride=1, action_dim=9):
         self.dataset, self.chunk_steps, self.horizon = dataset, chunk_steps, horizon
+        self.action_dim = action_dim
         self.policy_dt, self.gamma, self.reward = policy_dt, gamma, {**reward, 'policy_dt': policy_dt}
         self.indices = []
         self.command_indices = []
@@ -52,7 +53,7 @@ class OnlineChunks(Dataset):
             if not np.isclose(declared, policy_dt):
                 raise ValueError('RL rollout policy_dt differs from the teacher')
             with h5py.File(episode['path'], 'r') as file:
-                if episode['plans'] and file['plans/init_noise'].shape[1:] != (horizon, 10):
+                if episode['plans'] and file['plans/init_noise'].shape[1:] != (horizon, self.action_dim):
                     raise ValueError('Recorded noise horizon differs from the teacher')
                 ticks = file['commands/tick'][:] if 'commands/tick' in file else np.empty(0)
             middle = (episode['tick'][:-1] + episode['tick'][1:]) / 2.
@@ -80,7 +81,9 @@ class OnlineChunks(Dataset):
             low, high = int(indices.min()), int(indices.max()) + 1
             poses = file['commands/pose'][low:high][indices - low]
             widths = file['commands/gripper_target'][low:high][indices - low]
-            action = np.c_[pose7_to_pose9(poses), widths]
+            action = pose7_to_pose9(poses)
+            if self.action_dim == 10:
+                action = np.c_[action, widths]
             plan_ids = file['commands/plan_id'][low:high][indices - low]
             if np.all(plan_ids >= 0) and np.all(plan_ids == plan_ids[0]):
                 noise = file['plans/init_noise'][int(plan_ids[0])]
@@ -125,7 +128,7 @@ class ExpertChunks(Dataset):
         low, start, end, high = self.indices[index]
         obs_indices = np.maximum(np.arange(start - self.dataset.sampler.obs_steps + 1, start + 1), low)
         next_indices = np.maximum(np.arange(end - self.dataset.sampler.obs_steps + 1, end + 1), low)
-        action = self.dataset.read('action', np.arange(start, end))
+        action = self.dataset.read('action', np.arange(start, end))[..., :self.dataset.action_dim]
         durations = np.full(end - start, self.policy_dt, np.float64)
         terminal = end == high - 1
         reward = labels('success', terminal, False, durations, self.reward, terminal)

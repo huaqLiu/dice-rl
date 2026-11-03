@@ -9,9 +9,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--execution-config', help='按指定执行配置重新导出部署包，保留训练权重')
     parser.add_argument('--allow-draft', action='store_true', help='只生成不能用于真机的模拟/未确认包')
     args = parser.parse_args()
-    print(export_rl_policy(project_path(args.checkpoint), project_path(args.output), args.allow_draft))
+    execution = project_path(args.execution_config) if args.execution_config else None
+    print(export_rl_policy(project_path(args.checkpoint), project_path(args.output),
+                           args.allow_draft, execution_config=execution))
 
 
 if __name__ == '__main__':

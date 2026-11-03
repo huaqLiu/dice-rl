@@ -89,7 +89,7 @@ class ConditionalUnet1D(nn.Module):
         )
 
     def forward(self, noisy_action, timesteps, global_cond):
-        """(B, H, 10) + 扩散步 t + 观测条件 -> 同形状的预测噪声。"""
+        """(B, H, action_dim) + 扩散步 t + 观测条件 -> 同形状的预测噪声。"""
         if noisy_action.ndim != 3 or noisy_action.shape[-1] != self.action_dim:
             raise ValueError(f"Expected noisy actions (B, H, {self.action_dim})")
         batch_size, horizon = noisy_action.shape[:2]

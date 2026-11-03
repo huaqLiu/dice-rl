@@ -31,7 +31,8 @@ def evaluate(checkpoint, output, device='cpu', max_windows=15, stop_event=None):
     global_step, complete_training = state['global_step'], state.get('training_complete', False)
     checkpoint_epoch=state['epoch']
     del state
-    train, validation = make_datasets(config['task'], model.image_size if hasattr(model, 'image_size') else config['model']['image_size'])
+    action_dim = getattr(model, 'action_dim', config['model'].get('action_dim', 9))
+    train, validation = make_datasets(config['task'], model.image_size if hasattr(model, 'image_size') else config['model']['image_size'], action_dim)
     dataset = validation if len(validation) else train
     if dataset.metadata['dataset_id'] != dataset_id:
         raise ValueError('Evaluation dataset differs from checkpoint training dataset')
@@ -61,10 +62,12 @@ def evaluate(checkpoint, output, device='cpu', max_windows=15, stop_event=None):
         if not np.isfinite(result).all():
             raise ValueError('Policy produced nonfinite actions')
         reference = batch['action'][0].cpu().numpy()
+        if result.shape != reference.shape:
+            raise ValueError('Prediction/label action dimensions disagree')
         mask = batch['valid_mask'][0].cpu().numpy()
         prediction, desired = result[mask], reference[mask]
         pos = np.linalg.norm(prediction[:,:3]-desired[:,:3],axis=1)*1000
-        width = np.abs(prediction[:,9]-desired[:,9])*1000
+        width = np.abs(prediction[:,9]-desired[:,9])*1000 if action_dim == 10 else np.empty(0)
         try:
             rotation = rotation6d_to_matrix(prediction[:,3:9])
             target_rotation = rotation6d_to_matrix(desired[:,3:9])
@@ -78,7 +81,8 @@ def evaluate(checkpoint, output, device='cpu', max_windows=15, stop_event=None):
         prefix_mask[config['task']['act_steps']:]=False
         prefix_prediction,prefix_reference=result[prefix_mask],reference[prefix_mask]
         prefix_positions.extend((np.linalg.norm(prefix_prediction[:,:3]-prefix_reference[:,:3],axis=1)*1000).tolist())
-        prefix_widths.extend((np.abs(prefix_prediction[:,9]-prefix_reference[:,9])*1000).tolist())
+        if action_dim == 10:
+            prefix_widths.extend((np.abs(prefix_prediction[:,9]-prefix_reference[:,9])*1000).tolist())
         if rotation_error is None:
             prefix_angles.extend(angle[:int(prefix_mask.sum())].tolist())
         cases.append(dict(episode_id=int(batch['episode_id'][0]), frame_index=int(batch['frame_index'][0]),
@@ -88,7 +92,7 @@ def evaluate(checkpoint, output, device='cpu', max_windows=15, stop_event=None):
     report = dict(schema='dice_gear_dp_eval_v1', checkpoint=str(Path(checkpoint).resolve()),
         dataset_id=dataset_id, simulated=dataset.metadata['simulated'],
         checkpoint_training_complete=complete_training,checkpoint_epoch=checkpoint_epoch,
-        global_step=global_step, split='validation' if len(validation) else 'train', device=device,
+        global_step=global_step, split='validation' if len(validation) else 'train', device=device, action_dim=action_dim,
         completed_windows=len(cases), requested_windows=len(selected),
         complete=len(cases)==len(selected), position_error_mm=summarize(positions),
         rotation_error_deg=summarize(angles), gripper_error_mm=summarize(widths),

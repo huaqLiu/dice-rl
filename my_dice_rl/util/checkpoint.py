@@ -46,12 +46,26 @@ def load_checkpoint(path):
     return state
 
 
+def policy_model_config(config, weights):
+    """旧包未记录state_dim时，从归一化权重还原，避免误用新默认架构。"""
+    result = dict(config)
+    dimension = int(weights['state_normalizer.center'].numel())
+    if dimension not in (9, 10) or result.get('state_dim', dimension) != dimension:
+        raise ValueError('Checkpoint state_dim disagrees with normalizer weights')
+    result['state_dim'] = dimension
+    action_dim = int(weights['action_normalizer.center'].numel())
+    if action_dim not in (9, 10) or result.get('action_dim', action_dim) != action_dim:
+        raise ValueError('Checkpoint action_dim disagrees with normalizer weights')
+    result['action_dim'] = action_dim
+    return result
+
+
 def load_policy(path, device='cpu', use_ema=True):
     from my_dice_rl.model.diffusion.diffusion_policy import DiffusionPolicy
     state = load_checkpoint(path)
-    kwargs = {**state['model_config'], 'pretrained_vision': False}
-    model = DiffusionPolicy(**kwargs)
     weights = state['ema']['model'] if use_ema else state['model']
+    kwargs = {**policy_model_config(state['model_config'], weights), 'pretrained_vision': False}
+    model = DiffusionPolicy(**kwargs)
     model.load_state_dict(weights)
     return model.to(device).eval(), state
 

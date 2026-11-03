@@ -1,6 +1,8 @@
 task_config: ../task/gear_insertion.yaml
 
 model:
+  state_dim: 9  # XYZ + rotation6d；夹爪开度不进入观测网络
+  action_dim: 9  # 仅输出XYZ + rotation6d，保持已有夹持
   down_dims: [256, 512, 1024]
   time_embed_dim: 256
   train_diffusion_steps: 50

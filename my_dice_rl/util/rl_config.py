@@ -87,8 +87,9 @@ def load_rl_config(path=DEFAULT_RL_CONFIG, overrides=(), require_paths=True):
     if not m['hidden_dims'] or any(not isinstance(v, int) or isinstance(v, bool) or v < 1 for v in m['hidden_dims']):
         raise ValueError('hidden_dims must be positive integers')
     limit = np.asarray(m['residual_limit'], dtype=float)
-    if limit.shape != (10,) or not np.isfinite(limit).all() or np.any((limit < 0) | (limit > 1)):
-        raise ValueError('residual_limit must be ten normalized values in [0,1]')
+    action_dim = m.get('action_dim', len(limit))
+    if action_dim not in (9, 10) or limit.shape != (action_dim,) or not np.isfinite(limit).all() or np.any((limit < 0) | (limit > 1)):
+        raise ValueError('residual_limit must match 9 or legacy 10 action dimensions in [0,1]')
     if m['ensemble_size'] < 2 or not 1 <= m['target_subset'] <= m['ensemble_size'] or m['td_loss'] not in ('mse', 'huber'):
         raise ValueError('Invalid critic configuration')
     for key in ('normalize_q', 'retain_expert_bc'):
@@ -105,7 +106,14 @@ def load_rl_config(path=DEFAULT_RL_CONFIG, overrides=(), require_paths=True):
 
 
 def execution_limits(config):
-    return {key: config[key] for key in CONTROL_KEYS}
+    limits = {key: config[key] for key in CONTROL_KEYS}
+    if config.get('orientation_constraint') is not None:
+        from my_dice_rl.util.orientation_constraint import orientation_config
+        limits['orientation_constraint'] = orientation_config(config['orientation_constraint'])
+    if config.get('auto_cycle') is not None:
+        from my_dice_rl.util.auto_cycle_config import auto_cycle_config
+        limits['auto_cycle'] = auto_cycle_config(config['auto_cycle'], config)
+    return limits
 
 
 def require_review(review):

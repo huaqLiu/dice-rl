@@ -32,9 +32,23 @@ controller_manager:
     panda_cartesian_impedance_controller:
       type: panda_cartesian_impedance_controller/CartesianImpedanceController
 
+    panda_drag_controller:
+      type: panda_drag_controller/DragController
+
 franka_robot_state_broadcaster:
   ros__parameters:
     arm_id: panda
+
+panda_drag_controller:
+  ros__parameters:
+    joints: [panda_joint1, panda_joint2, panda_joint3, panda_joint4, panda_joint5, panda_joint6, panda_joint7]
+    drag_damping: [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0]
+    hold_stiffness: [60.0, 60.0, 60.0, 50.0, 30.0, 20.0, 10.0]
+    hold_damping: [8.0, 8.0, 8.0, 7.0, 5.0, 4.0, 3.0]
+    heartbeat_timeout_s: 0.5
+    max_joint_velocity: 0.5
+    torque_limit: 8.0
+    torque_rate: 500.0
 
 model_example_controller:
   ros__parameters:

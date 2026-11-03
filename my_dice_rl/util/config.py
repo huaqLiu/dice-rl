@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TRAIN_CONFIG = PROJECT_ROOT / 'cfg/pretrain/train_dp.yaml'
+DEFAULT_TRAIN_CONFIG = PROJECT_ROOT / 'cfg/pretrain/train_dp_clip.yaml'
 
 
 def project_path(path):
@@ -46,6 +46,8 @@ def load_train_config(path=DEFAULT_TRAIN_CONFIG, overrides=()):
 
 def model_config(config):
     result = copy.deepcopy(config['model'])
+    result.setdefault('state_dim', 9)
+    result.setdefault('action_dim', 9)
     for key in ('obs_steps', 'horizon_steps', 'act_steps'):
         result[key] = config['task'][key]
     return result

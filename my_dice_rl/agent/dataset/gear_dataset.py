@@ -22,7 +22,7 @@ def split_episodes(count, val_ratio=.2, seed=42):
 
 class GearDataset(Dataset):
     def __init__(self, path, episode_ids=None, obs_steps=2, horizon_steps=20,
-                 stride=1, image_size=224, allow_demo=False):
+                 stride=1, image_size=224, allow_demo=False, action_dim=9):
         self.path = str(Path(path).expanduser().resolve())
         if not Path(self.path).is_dir():
             raise FileNotFoundError(f'Processed dataset missing: {self.path}; run process_gear_dataset first')
@@ -36,7 +36,13 @@ class GearDataset(Dataset):
         if not len(self.episode_ends):
             raise ValueError('Dataset contains no episodes')
         count = int(self.episode_ends[-1])
-        for key, shape in [('robot_eef_pose', (9,)), ('gripper_width', (1,)), ('action', (10,))]:
+        stored_dim = root['data/action'].shape[-1]
+        if self.metadata.get('action_dim', stored_dim) != stored_dim:
+            raise ValueError('Stored action dimension disagrees with dataset metadata')
+        if action_dim not in (9, 10) or stored_dim not in (9, 10) or action_dim > stored_dim:
+            raise ValueError('Dataset actions require 9 or legacy 10 dimensions; cannot invent gripper targets')
+        self.action_dim = action_dim
+        for key, shape in [('robot_eef_pose', (9,)), ('gripper_width', (1,)), ('action', (stored_dim,))]:
             if root['data/' + key].shape != (count, *shape):
                 raise ValueError(f'Invalid dataset shape: {key}')
         for key in ('camera_wrist', 'camera_external'):
@@ -79,29 +85,33 @@ class GearDataset(Dataset):
             obs[key] = torch.from_numpy(rgb.transpose(0, 3, 1, 2).copy()).float() / 255.
         for key in ('robot_eef_pose', 'gripper_width'):
             obs[key] = torch.from_numpy(self.read(key, obs_indices).astype(np.float32))
-        return dict(obs=obs, action=torch.from_numpy(self.read('action', act_indices).astype(np.float32)),
+        return dict(obs=obs, action=torch.from_numpy(self.read('action', act_indices)[..., :self.action_dim].astype(np.float32)),
                     valid_mask=torch.from_numpy(valid), episode_id=episode, frame_index=anchor)
 
-    def normalizer_data(self):
+    def normalizer_data(self, state_dim=9):
         """Only this dataset's selected (training) episodes contribute statistics."""
+        if state_dim not in (9, 10):
+            raise ValueError('State statistics require 9 or legacy 10 dimensions')
         starts = np.r_[0, self.episode_ends[:-1]]
         states, actions = [], []
         for episode in self.episode_ids:
             section = slice(int(starts[episode]), int(self.episode_ends[episode]))
             pose = self.root['data/robot_eef_pose'][section]
-            gripper = self.root['data/gripper_width'][section]
-            states.append(np.concatenate([pose, gripper], axis=-1))
-            actions.append(self.root['data/action'][section])
+            if state_dim == 10:
+                gripper = self.root['data/gripper_width'][section]
+                pose = np.concatenate([pose, gripper], axis=-1)
+            states.append(pose)
+            actions.append(self.root['data/action'][section][..., :self.action_dim])
         if not states:
             raise ValueError('Cannot fit normalization on an empty split')
         return (torch.from_numpy(np.concatenate(states).astype(np.float32)),
                 torch.from_numpy(np.concatenate(actions).astype(np.float32)))
 
 
-def make_datasets(task, image_size=224):
+def make_datasets(task, image_size=224, action_dim=9):
     kwargs = dict(path=task['dataset_path'], obs_steps=task['obs_steps'],
                   horizon_steps=task['horizon_steps'], stride=task['sample_stride'],
-                  image_size=image_size, allow_demo=task['allow_demo'])
+                  image_size=image_size, allow_demo=task['allow_demo'], action_dim=action_dim)
     whole = GearDataset(**kwargs)
     metadata = whole.metadata
     if metadata['task'] != task['name']:
