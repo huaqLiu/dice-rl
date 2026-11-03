@@ -1,4 +1,4 @@
-"""两路 RGB 与9维末端位姿拼接；10维状态仅用于读取旧模型。"""
+"""两路或三路 RGB 与9维末端位姿拼接；10维状态仅用于读取旧模型。"""
 from collections.abc import Mapping
 import copy
 
@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from torchvision.models import ResNet18_Weights, resnet18
 from torchvision import transforms
+from my_dice_rl.util.cameras import camera_keys as configured_camera_keys
 
 
 def _replace_batchnorm(module: nn.Module):
@@ -33,10 +34,11 @@ class MultiImageEncoder(nn.Module):
     camera_keys = ("camera_wrist", "camera_external")
     pose_dim = 9  # 实际 XYZ + rotation6d；采集文件的四元数要由后续数据集转换。
     def __init__(self, image_size: int = 224, pretrained: bool = False, state_dim: int = 9,
-                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False):
+                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False, camera_keys=None):
         super().__init__()
         if image_size < 32:
             raise ValueError("image_size must be at least 32")
+        self.camera_keys = configured_camera_keys({'camera_keys': camera_keys}) if camera_keys is not None else self.camera_keys
         self.image_size = image_size
         if isinstance(state_dim, bool) or state_dim not in (9, 10):
             raise ValueError('state_dim must be 9 (pose) or legacy 10 (pose + gripper)')
@@ -53,13 +55,14 @@ class MultiImageEncoder(nn.Module):
             base = CLIPVisionEncoder(pretrained)
             self.visual_feature_dim = base.feature_dim
             mean, std = base.image_mean, base.image_std
-            # Both cameras start from identical pretrained weights, then learn independently.
-            self.backbones = nn.ModuleDict({self.camera_keys[0]: base, self.camera_keys[1]: copy.deepcopy(base)})
+            # All cameras start from identical pretrained weights, then learn independently.
+            self.backbones = nn.ModuleDict({key: base if index == 0 else copy.deepcopy(base)
+                                            for index, key in enumerate(self.camera_keys)})
         else:
             self.visual_feature_dim = 512
             mean, std = [.485, .456, .406], [.229, .224, .225]
             self.backbones = nn.ModuleDict({key: _resnet18(pretrained) for key in self.camera_keys})
-        self.feature_dim = self.visual_feature_dim * 2 + self.state_dim
+        self.feature_dim = self.visual_feature_dim * len(self.camera_keys) + self.state_dim
         self.register_buffer("image_mean", torch.tensor(mean).view(1, 3, 1, 1))
         self.register_buffer("image_std", torch.tensor(std).view(1, 3, 1, 1))
         # Same crop ratio / jitter magnitudes as the original robot config; train only.
@@ -77,7 +80,7 @@ class MultiImageEncoder(nn.Module):
         return self
 
     def forward(self, obs: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        """输入图像(B, To, 3, 224, 224)，CLIP输出1545维/帧，旧ResNet输出1033维。
+        """输入图像(B, To, 3, 224, 224)，CLIP每路输出768维，拼接所有视角与机器人状态。
 
         RGB 为 [0,1] 浮点数。位姿与开度在进入本编码器前由 DP 模型归一化。
         """

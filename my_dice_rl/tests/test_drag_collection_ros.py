@@ -1,4 +1,5 @@
 """Real ROS subscriptions/services, fake devices on isolated DDS domain 187."""
+import pytest
 import json
 import time
 
@@ -19,17 +20,20 @@ from my_dice_rl.tests.test_drag_collection import drag_config
 from my_dice_rl.util.recording import Recorder, StreamBuffer
 
 
-def test_drag_ros_record_and_safety_pause_without_pose_commands(tmp_path):
+@pytest.mark.parametrize('camera_count', [2,3])
+def test_drag_ros_record_and_safety_pause_without_pose_commands(tmp_path, camera_count):
     rclpy.init(domain_id=187)
     config = drag_config(tmp_path)
     config['min_episode_frames'] = 2
+    config['camera_names'] = ['wrist','external'] + (['side'] if camera_count==3 else [])
+    if camera_count==3: config['side_topic']='/dice_drag_test/side/image_raw'
     prefix = '/dice_drag_test'
     for key in ('wrist_topic', 'external_topic', 'gripper_topic', 'robot_state_topic', 'target_topic',
                 'teleop_topic', 'teleop_enable_service'):
         config[key] = prefix+'/'+key
     config['drag'].update(heartbeat_topic=prefix+'/heartbeat', state_topic=prefix+'/state')
     config['reset'].update(command_topic=prefix+'/reset_target', audit_file=str(tmp_path/'reset_events.jsonl'))
-    buffers = StreamBuffer()
+    buffers = StreamBuffer(config)
     backend = DragCollectorNode(config, buffers)
     fake = Node('drag_fake_devices')
     executor = SingleThreadedExecutor()
@@ -46,7 +50,7 @@ def test_drag_ros_record_and_safety_pause_without_pose_commands(tmp_path):
     fake.create_subscription(Empty, config['drag']['heartbeat_topic'],
         lambda msg: heartbeat_count.__setitem__(0, heartbeat_count[0]+1), 1)
     tf = TransformBroadcaster(fake)
-    images = [fake.create_publisher(Image, config[key+'_topic'], 1) for key in ('wrist', 'external')]
+    images = [fake.create_publisher(Image, config[key+'_topic'], 1) for key in buffers.camera_names]
     grip = fake.create_publisher(JointState, config['gripper_topic'], 1)
     robot = fake.create_publisher(FrankaRobotState, config['robot_state_topic'], 1)
     state = fake.create_publisher(String, config['drag']['state_topic'], 1)

@@ -30,8 +30,9 @@ from my_dice_rl.util.config import PROJECT_ROOT
 
 
 @pytest.mark.parametrize('executor_class', [DPExecutor, AutoCycleExecutor])
+@pytest.mark.parametrize('camera_count', [2,3])
 @pytest.mark.parametrize('action_dim', [9, 10])
-def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path, executor_class, action_dim):
+def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path, executor_class, action_dim, camera_count):
     rclpy.init(domain_id=187, args=['--ros-args', '-r', '__ns:=/policy_test',
         '-r', '/cartesian_impedance_target:=/policy_test/target',
         '-r', '/dice_spacemouse/joy:=/policy_test/joy',
@@ -53,7 +54,9 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path, executor_cla
         teleop_topic='/policy_test/dice_spacemouse_teleop/recording_state',
         teleop_enable_service='/policy_test/dice_spacemouse_teleop/enable',
         reset_service='/policy_test/dice_spacemouse_teleop/reset')
-    buffer = ObservationBuffer()
+    collector['camera_names'] = ['wrist','external'] + (['side'] if camera_count==3 else [])
+    if camera_count==3: collector['side_topic']='/policy_test/side/image_raw'
+    buffer = ObservationBuffer(collector)
     teleop = FrankaSpaceMouseTeleop()
     backend = PolicyROSNode(collector, config, buffer)
     fake = Node('fake_devices')
@@ -67,7 +70,7 @@ def test_ros_handover_policy_gripper_and_labelled_rollout(tmp_path, executor_cla
 
     fake.create_subscription(PoseStamped, collector['target_topic'], receive_target, 10)
     tf = TransformBroadcaster(fake)
-    images = [fake.create_publisher(Image, collector[key+'_topic'], 10) for key in ('wrist', 'external')]
+    images = [fake.create_publisher(Image, collector[key+'_topic'], 10) for key in buffer.camera_names]
     joints = fake.create_publisher(JointState, collector['gripper_topic'], 10)
     states = fake.create_publisher(FrankaRobotState, collector['robot_state_topic'], 10)
     joystick = fake.create_publisher(Joy, '/policy_test/joy', 10)

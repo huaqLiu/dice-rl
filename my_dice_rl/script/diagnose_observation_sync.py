@@ -22,8 +22,8 @@ def summary(values):
 
 
 class TimingBuffer(ObservationBuffer):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config=None):
+        super().__init__(config)
         self.wall_now = time.time
         self.started = float('inf')
         self.arrivals = defaultdict(list)
@@ -61,7 +61,7 @@ def main():
     from my_dice_rl.env.real.policy_backend import PolicyROSNode
 
     rclpy.init(args=[])
-    buffer = TimingBuffer()
+    buffer = TimingBuffer(collector)
     costs = defaultdict(list)
 
     class TimingNode(CollectorNode):
@@ -91,7 +91,7 @@ def main():
         try:
             frame = buffer.snapshot(query, config['max_age_s'], config['max_sensor_skew_s'],
                                     config.get('max_gripper_age_s'))
-            stamps = [frame[k].received for k in ('wrist', 'external', 'eef', 'robot')]
+            stamps = [frame[k].received for k in (*buffer.camera_names, 'eef', 'robot')]
             skews.append((max(stamps)-min(stamps))*1000)
         except ValueError as exc:
             counts[kind+'_failures'] += 1
@@ -127,7 +127,7 @@ def main():
             window.setWindowTitle('只读同步诊断 · 不发送机械臂指令')
             layout = QtWidgets.QHBoxLayout(window)
             labels = {}
-            for key in ('wrist', 'external'):
+            for key in buffer.camera_names:
                 labels[key] = QtWidgets.QLabel('等待 '+key)
                 labels[key].setFixedSize(500, 400)
                 layout.addWidget(labels[key])
@@ -169,7 +169,7 @@ def main():
                 callback_cost_ms=summary(costs[key]))
         report['observation_channels_complete'] = all(v['count'] > 0 for v in report['channels'].values())
         if args.save_events:
-            report['camera_events'] = {k: [row[:2] for row in buffer.arrivals[k]] for k in ('wrist', 'external')}
+            report['camera_events'] = {k: [row[:2] for row in buffer.arrivals[k]] for k in buffer.camera_names}
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
         node.destroy_node()

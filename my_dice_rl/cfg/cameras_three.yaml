@@ -1,0 +1,11 @@
+camera_names:
+- wrist
+- external
+- side
+devices:
+  wrist:
+    serial_number: ''
+  external:
+    serial_number: CL83842014T
+  side:
+    serial_number: CL83842013K

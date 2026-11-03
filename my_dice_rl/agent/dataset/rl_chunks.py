@@ -117,7 +117,7 @@ class ExpertChunks(Dataset):
     def _obs(self, indices):
         obs = {key: torch.from_numpy(self.dataset.read(key, indices).astype(np.float32))
                for key in ('robot_eef_pose', 'gripper_width')}
-        for key in ('camera_wrist', 'camera_external'):
+        for key in self.dataset.camera_keys:
             rgb = self.dataset.read(key, indices)
             if self.dataset.image_size != 224:
                 rgb = np.stack([cv2.resize(x, (self.dataset.image_size,) * 2, interpolation=cv2.INTER_AREA) for x in rgb])

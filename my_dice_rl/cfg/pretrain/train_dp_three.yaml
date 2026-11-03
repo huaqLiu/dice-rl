@@ -1,0 +1,43 @@
+task_config: ../task/gear_insertion_three.yaml
+model:
+  state_dim: 9
+  action_dim: 9
+  down_dims:
+  - 256
+  - 512
+  - 1024
+  time_embed_dim: 256
+  train_diffusion_steps: 50
+  inference_steps: 16
+  pretrained_vision: true
+  image_size: 224
+  vision_encoder: clip_vit_b32
+  frozen_vision: false
+  vision_augment: true
+  camera_keys:
+  - camera_wrist
+  - camera_external
+  - camera_side
+training:
+  device: cuda:0
+  seed: 42
+  epochs: 600
+  batch_size: 8
+  num_workers: 4
+  torch_threads: 2
+  checkpoint_every: 500
+  device_lock: log_dir/rl/device.lock
+  learning_rate: 0.0001
+  weight_decay: 1.0e-06
+  warmup_steps: 500
+  min_lr_ratio: 0.01
+  grad_clip_norm: 1.0
+  use_amp: true
+  ema_decay: 0.995
+  output_root: log_dir/pretrain/gear_dp_clip_three
+  max_train_steps: null
+  max_val_steps: null
+  max_total_steps: null
+  vision_learning_rate: 1.0e-05
+  early_stopping_patience: 30
+  early_stopping_min_delta: 0.0001

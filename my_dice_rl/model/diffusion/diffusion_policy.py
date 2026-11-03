@@ -18,7 +18,7 @@ class DiffusionPolicy(nn.Module):
                  down_dims=(256, 512, 1024), time_embed_dim=256,
                  train_diffusion_steps=50, inference_steps=16,
                  pretrained_vision=False, image_size=224, state_dim=9, action_dim=9,
-                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False):
+                 vision_encoder='resnet18', frozen_vision=False, vision_augment=False, camera_keys=None):
         super().__init__()
         if obs_steps < 1 or not 1 <= act_steps <= horizon_steps:
             raise ValueError("Require obs_steps >= 1 and 1 <= act_steps <= horizon_steps")
@@ -30,7 +30,7 @@ class DiffusionPolicy(nn.Module):
             raise ValueError('action_dim must be 9 or legacy 10')
         self.action_dim = action_dim
         self.obs_encoder = MultiImageEncoder(image_size, pretrained_vision, state_dim,
-                                            vision_encoder, frozen_vision, vision_augment)
+                                            vision_encoder, frozen_vision, vision_augment, camera_keys)
         self.network = ConditionalUnet1D(
             self.action_dim, self.obs_encoder.feature_dim * obs_steps,
             down_dims=down_dims, time_embed_dim=time_embed_dim)

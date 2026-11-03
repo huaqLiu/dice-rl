@@ -12,13 +12,15 @@ def main():
     parser.add_argument('--smoke', action='store_true', help='Run loss/backward and action prediction')
     parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--encoder', choices=['clip_vit_b32', 'resnet18'], default='clip_vit_b32')
+    parser.add_argument('--camera-count', type=int, choices=[2, 3], default=2)
     parser.add_argument('--pretrained', action='store_true', help='Load pretrained weights; default prints architecture only')
     args = parser.parse_args()
     torch.manual_seed(0)
-    policy = DiffusionPolicy(vision_encoder=args.encoder, pretrained_vision=args.pretrained).to(args.device)
-    print('Observation: wrist/external RGB [B,2,3,224,224]; actual pose [B,2,9]')
+    keys = ['camera_wrist', 'camera_external'] + (['camera_side'] if args.camera_count == 3 else [])
+    policy = DiffusionPolicy(vision_encoder=args.encoder, pretrained_vision=args.pretrained, camera_keys=keys).to(args.device)
+    print('Observation:', ', '.join(keys), 'RGB [B,2,3,224,224]; actual pose [B,2,9]')
     size = policy.obs_encoder.visual_feature_dim
-    print(f'Encoder: {args.encoder} x 2 -> {size} + {size} + 9 = {policy.obs_encoder.feature_dim} features/frame')
+    print(f'Encoder: {args.encoder} x {len(keys)} -> {size} x {len(keys)} + 9 = {policy.obs_encoder.feature_dim} features/frame')
     print(f'Condition: 2 x {policy.obs_encoder.feature_dim} = {policy.obs_encoder.feature_dim*2}; ConditionalUnet1D channels: [256,512,1024]')
     print('Pretrained weights loaded:', args.pretrained, '(training default loads CLIP pretrained weights)')
     print('Actions: XYZ(3) + rotation6d(6) = 9; preserve existing grasp')
@@ -33,11 +35,8 @@ def main():
     states = torch.randn(64, 9, device=device)
     actions = states.clone()
     policy.fit_normalizer(states, actions)
-    obs = {
-        'camera_wrist': torch.rand(1, 2, 3, 224, 224, device=device),
-        'camera_external': torch.rand(1, 2, 3, 224, 224, device=device),
-        'robot_eef_pose': states[:2, :9].unsqueeze(0),
-    }
+    obs = {key: torch.rand(1, 2, 3, 224, 224, device=device) for key in keys}
+    obs['robot_eef_pose'] = states[:2, :9].unsqueeze(0)
     policy.train()
     loss = policy.compute_loss({'obs': obs, 'action': actions[:20].unsqueeze(0)})
     loss.backward()

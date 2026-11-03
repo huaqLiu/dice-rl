@@ -20,8 +20,11 @@ for key in ("QT_QPA_PLATFORM_PLUGIN_PATH", "QT_QPA_FONTDIR"):
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from my_dice_rl.util.recording import Recorder, STREAMS, StreamBuffer, letterbox, policy_image, mark_reviewed_success
+from my_dice_rl.util.cameras import camera_names, validate_camera_topics
 from my_dice_rl.script.gui_keys import bind_button_keys, install_numeric_editor_filter
 
+
+CAMERA_TITLES = dict(wrist="腕部 · D435i", external="前方 · Femto Bolt", side="侧面 · Femto Bolt")
 
 def show_rgb(label, rgb):
     rgb = letterbox(rgb, max(320, label.width()), max(240, label.height()))
@@ -41,7 +44,9 @@ class Playback(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         images = QtWidgets.QHBoxLayout()
         self.labels = []
-        for name in ("腕部 D435i", "外部 Femto Bolt"):
+        self.camera_names = camera_names(json.loads(self.file.attrs["config_json"]))
+        for key in self.camera_names:
+            name = CAMERA_TITLES[key]
             label = QtWidgets.QLabel(name)
             label.setMinimumSize(400, 300)
             label.setAlignment(QtCore.Qt.AlignCenter)
@@ -66,7 +71,7 @@ class Playback(QtWidgets.QDialog):
 
     def render(self, index):
         try:
-            for label, key in zip(self.labels, ("wrist", "external")):
+            for label, key in zip(self.labels, self.camera_names):
                 bgr = cv2.imdecode(self.file[f"rgb/{key}"][index], cv2.IMREAD_COLOR)
                 if bgr is None:
                     raise ValueError("JPEG 无法解码")
@@ -150,7 +155,8 @@ class Window(QtWidgets.QMainWindow):
             '8：直线复位，不改变夹爪。请先结束录制、退出轴并确认路径畅通；2 / 0 / Esc 可停止。'))
         row = QtWidgets.QHBoxLayout()
         self.previews = {}
-        for key, title in (("wrist", "腕部 · D435i"), ("external", "机械臂前方 · Femto Bolt")):
+        for key in camera_names(config):
+            title = CAMERA_TITLES[key]
             column = QtWidgets.QVBoxLayout()
             column.addWidget(QtWidgets.QLabel(title))
             label = QtWidgets.QLabel("等待相机图像")
@@ -294,11 +300,11 @@ class Window(QtWidgets.QMainWindow):
                 image = policy_image(sample.value) if self.crop_preview.isChecked() else sample.value
                 show_rgb(label, image)
         health = []
-        names = dict(wrist="腕部相机", external="外部相机", eef="末端位姿", target="目标位姿",
+        names = dict(wrist="腕部相机", external="前方相机", side="侧面相机", eef="末端位姿", target="目标位姿",
                      gripper="夹爪状态", teleop="遥操作", robot="关节状态")
         if self.config.get('collection_mode') == 'kinesthetic':
             names['teleop'] = '拖拽控制'
-        for key in STREAMS:
+        for key in self.buffers.streams:
             sample = self.buffers.latest(key)
             age = now - sample.received if sample else float("inf")
             color = "#34d399" if age <= self.config["max_age_s"] else "#fb7185"
@@ -451,7 +457,8 @@ class Window(QtWidgets.QMainWindow):
 def demo_loop(buffers, stop):
     while not stop.is_set():
         now = time.monotonic()
-        for key, color in (("wrist", (38, 80, 110)), ("external", (40, 95, 65))):
+        for key in buffers.camera_names:
+            color = {"wrist": (38,80,110), "external": (40,95,65), "side": (95,45,80)}[key]
             rgb = np.full((480, 640, 3), color, np.uint8)
             cv2.circle(rgb, (320 + int(80 * np.sin(now)), 240), 45, (220, 170, 40), -1)
             cv2.putText(rgb, "SIMULATED / " + key, (25, 45), cv2.FONT_HERSHEY_SIMPLEX, .8, (255, 255, 255), 2)
@@ -481,6 +488,7 @@ def main():
         parser.error("--smoke-seconds requires --demo and >=2 seconds")
     with open(args.config) as f:
         config = yaml.safe_load(f)
+    validate_camera_topics(config)
     if args.drag:
         from my_dice_rl.util.drag_config import validate_drag_config
         validate_drag_config(config)
@@ -490,7 +498,7 @@ def main():
     if not 1 <= config["record_hz"] <= 30 or config["max_age_s"] <= 0:
         parser.error("invalid recording frequency or freshness threshold")
     app = QtWidgets.QApplication(sys.argv[:1])
-    buffers = StreamBuffer()
+    buffers = StreamBuffer(config)
     shutdown = threading.Event()
     node = None
     executor = None

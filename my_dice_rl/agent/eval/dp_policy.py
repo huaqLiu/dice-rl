@@ -10,6 +10,7 @@ import torch
 from my_dice_rl.util.checkpoint import load_policy
 from my_dice_rl.util.recording import policy_image
 from my_dice_rl.util.rotation import pose7_to_pose9
+from my_dice_rl.util.cameras import camera_names
 
 
 class CheckpointPolicy:
@@ -44,6 +45,13 @@ class CheckpointPolicy:
                 raise ValueError(f'Checkpoint {key} 与执行配置不一致')
         if not bool(self.model.state_normalizer.fitted) or not bool(self.model.action_normalizer.fitted):
             raise ValueError('Checkpoint 缺少已拟合归一化')
+        self.camera_names = camera_names(task)
+        self.camera_keys = tuple('camera_' + key for key in self.camera_names)
+        if self.camera_keys != tuple(self.model.obs_encoder.camera_keys if hasattr(self.model, 'obs_encoder')
+                                     else self.model.teacher.obs_encoder.camera_keys):
+            raise ValueError('Checkpoint task cameras disagree with model')
+        if self.camera_names != camera_names(collector):
+            raise ValueError('策略相机数量/顺序与采集配置不一致')
         self.dt = 1 / float(task['record_hz'])
         self.obs_steps = self.model.obs_steps
         self.horizon = self.model.horizon_steps
@@ -56,7 +64,7 @@ class CheckpointPolicy:
         # Warm CUDA kernels before the user can confirm reset/start a physical episode.
         center = self.model.state_normalizer.center
         obs = {key: torch.zeros(1, self.obs_steps, 3, self.image_size, self.image_size,
-                                device=self.device) for key in ('camera_wrist', 'camera_external')}
+                                device=self.device) for key in self.camera_keys}
         obs['robot_eef_pose'] = center[:9].expand(1, self.obs_steps, 9)
         if center.numel() == 10:
             obs['gripper_width'] = center[9:].expand(1, self.obs_steps, 1)
@@ -67,7 +75,7 @@ class CheckpointPolicy:
 
     def predict(self, history):
         obs = {}
-        for source, key in (('wrist', 'camera_wrist'), ('external', 'camera_external')):
+        for source, key in zip(self.camera_names, self.camera_keys):
             images = []
             for frame in history:
                 image = policy_image(frame[source].value)

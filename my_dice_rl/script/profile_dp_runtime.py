@@ -27,7 +27,10 @@ def profile(checkpoint,output,device='cuda:0',windows=10):
     availability = read_gpu(str(device).split(':')[-1] if ':' in str(device) else '0') if gpu else None
     if availability and availability['processes']:
         raise RuntimeError('GPU 有计算任务占用，请等待空闲后再做部署耗时测试')
-    collector=yaml.safe_load((PROJECT_ROOT/'cfg/collect.yaml').read_text())
+    from my_dice_rl.util.checkpoint import load_checkpoint
+    from my_dice_rl.util.cameras import camera_names
+    names = camera_names(load_checkpoint(checkpoint)['config']['task'])
+    collector=yaml.safe_load((PROJECT_ROOT/('cfg/collect_three.yaml' if len(names)==3 else 'cfg/collect.yaml')).read_text())
     execution=yaml.safe_load((PROJECT_ROOT/'cfg/execute_dp.yaml').read_text())
     lease=DeviceLease(PROJECT_ROOT/'log_dir/rl/device.lock') if gpu else nullcontext()
     with lease:
@@ -47,7 +50,7 @@ def profile(checkpoint,output,device='cuda:0',windows=10):
                 history=[]
                 for frame in np.clip(np.arange(anchor-policy.obs_steps+1,anchor+1),0,count-1):
                     observation={key:Sample(0.,0.,cv2.cvtColor(cv2.imdecode(file['rgb/'+key][frame],
-                        cv2.IMREAD_COLOR),cv2.COLOR_BGR2RGB)) for key in ('wrist','external')}
+                        cv2.IMREAD_COLOR),cv2.COLOR_BGR2RGB)) for key in policy.camera_names}
                     observation['eef']=Sample(0.,0.,file['robot_eef_pose'][frame])
                     observation['gripper']=Sample(0.,0.,float(file['gripper_width'][frame,0]))
                     history.append(observation)

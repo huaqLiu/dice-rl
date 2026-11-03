@@ -106,3 +106,27 @@ def test_clip_teacher_and_residual_policy_keep_same_fixed_noise_actions(clip_pol
     actual = policy.predict_action(obs, init_noise=noise)['action_pred']
     torch.testing.assert_close(actual, expected)
     assert all(not parameter.requires_grad for parameter in teacher.parameters())
+
+
+def test_three_pretrained_clip_branches_encode_side_and_receive_gradients():
+    keys = ['camera_wrist','camera_external','camera_side']
+    torch.set_num_threads(2)
+    model = DiffusionPolicy(vision_encoder='clip_vit_b32', pretrained_vision=True,
+        camera_keys=keys, image_size=224, horizon_steps=4, act_steps=2, down_dims=[16,32],
+        time_embed_dim=16, train_diffusion_steps=4, inference_steps=2)
+    model.fit_normalizer(torch.randn(20,9),torch.randn(20,9))
+    assert model.obs_encoder.feature_dim==2313
+    params=[model.obs_encoder.backbones[k].model.patch_embed.proj.weight for k in keys]
+    assert len({p.data_ptr() for p in params})==3
+    for param in params[1:]:torch.testing.assert_close(param,params[0],rtol=0,atol=0)
+    obs={k:torch.rand(1,2,3,224,224) for k in keys}
+    obs['robot_eef_pose']=torch.randn(1,2,9)
+    loss=model.train().compute_loss(dict(obs=obs,action=torch.randn(1,4,9)))
+    loss.backward()
+    assert torch.isfinite(loss)
+    for param in params:
+        assert param.grad is not None and torch.isfinite(param.grad).all() and param.grad.abs().sum()>0
+    model.zero_grad(set_to_none=True)
+    with torch.no_grad():
+        assert model.eval().encode_obs(obs).shape==(1,4626)
+        assert model.predict_action(obs)['action_pred'].shape==(1,4,9)

@@ -15,6 +15,7 @@ import time
 import cv2
 import h5py
 import numpy as np
+from my_dice_rl.util.cameras import camera_names, matched_images
 
 SCHEMA = "dice_panda_gear_dual_rgb_v1"
 STREAMS = ("wrist", "external", "eef", "target", "gripper", "teleop", "robot")
@@ -64,10 +65,12 @@ class Sample:
 
 
 class StreamBuffer:
-    def __init__(self):
+    def __init__(self, config=None):
+        self.camera_names = camera_names(config)
+        self.streams = (*self.camera_names, "eef", "target", "gripper", "teleop", "robot")
         self.lock = threading.Lock()
         # Keep enough camera history to match a delayed frame to its peer.
-        self.buffers = {k: deque(maxlen=16 if k in ("wrist", "external") else 120) for k in STREAMS}
+        self.buffers = {k: deque(maxlen=16 if k in self.camera_names else 120) for k in self.streams}
         self.errors = {}
         self.camera_info = {}
 
@@ -99,14 +102,14 @@ class StreamBuffer:
             for key, buffer in self.buffers.items():
                 if key in self.errors:
                     raise ValueError(f"{key}: {self.errors[key]}")
-                if key in ("wrist", "external"):
+                if key in self.camera_names:
                     continue
                 sample = next((s for s in reversed(buffer) if s.received <= tick), None)
                 if sample is None or tick - sample.received > max_age:
                     raise ValueError(f"{key}: 等待数据或数据超时")
                 result[key] = sample
             camera_candidates = {}
-            for key in ("wrist", "external"):
+            for key in self.camera_names:
                 camera_candidates[key] = [
                     sample for sample in self.buffers[key]
                     if 0 <= tick - sample.received <= max_age
@@ -116,19 +119,10 @@ class StreamBuffer:
             # Pair buffered images by host receive time. The freshest image from
             # each camera can have >max_skew separation when one callback is
             # delayed by a frame; an older causal pair may still be valid.
-            pairs = (
-                (wrist, external)
-                for wrist in camera_candidates["wrist"]
-                for external in camera_candidates["external"]
-                if abs(wrist.received - external.received) <= max_skew
-            )
-            pair = min(pairs, key=lambda p: (
-                max(tick - p[0].received, tick - p[1].received),
-                abs(p[0].received - p[1].received),
-            ), default=None)
+            pair = matched_images(camera_candidates, self.camera_names, max_skew)
             if pair is None:
-                raise ValueError("两路相机在允许时间内没有可配对的图像")
-            result["wrist"], result["external"] = pair
+                raise ValueError("相机在允许时间内没有可配对的图像")
+            result.update(pair)
         telemetry = result["teleop"].value
         if not telemetry.get("gripper_known"):
             raise ValueError("夹爪目标未知：登记现有夹持，或用右键操作夹爪")
@@ -142,6 +136,8 @@ class StreamBuffer:
 class EpisodeWriter:
     def __init__(self, session, config, camera_info=None):
         self.config = config
+        self.camera_names = camera_names(config)
+        self.streams = (*self.camera_names, "eef", "target", "gripper", "teleop", "robot")
         session = Path(session)
         session.mkdir(parents=True, exist_ok=True)
         # Atomic mkdir prevents two collectors from overwriting an episode.
@@ -156,7 +152,7 @@ class EpisodeWriter:
             raise RuntimeError("演示编号已耗尽")
         self.path = path
         self.metadata = dict(
-            schema=SCHEMA, status="recording", frames=0,
+            schema=SCHEMA, camera_names=list(self.camera_names), status="recording", frames=0,
             created_at=datetime.now().astimezone().isoformat(), config=config,
             camera_info=camera_info or {},
             pose_convention="base_frame -> ee_frame; [x,y,z,qx,qy,qz,qw]; metres",
@@ -215,7 +211,7 @@ class EpisodeWriter:
                 raise ValueError(f"{key}: 位姿或四元数无效")
         # Encode first; a failed row remains partial and can never be exported.
         encoded = {}
-        for key in ("wrist", "external"):
+        for key in self.camera_names:
             rgb = policy_image(samples[key].value, self.config["save_width"], self.config["save_height"])
             ok, jpeg = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
                                     [cv2.IMWRITE_JPEG_QUALITY, self.config["jpeg_quality"]])
@@ -231,7 +227,7 @@ class EpisodeWriter:
         encoded_at = time.monotonic()
         for key, value in values.items():
             self._append(key, value)
-        for key in STREAMS:
+        for key in self.streams:
             self._append(f"source_timestamp/{key}", np.float64(samples[key].source))
             self._append(f"receive_timestamp/{key}", np.float64(samples[key].received))
         for key, jpeg in encoded.items():
@@ -488,7 +484,8 @@ def mark_reviewed_success(episode_path, note):
         if file.attrs.get("schema") != SCHEMA:
             raise ValueError("轨迹格式不匹配")
         for key in ("timestamp", "robot_eef_pose", "target_eef_pose",
-                    "gripper_width", "gripper_target_width", "rgb/wrist", "rgb/external"):
+                    "gripper_width", "gripper_target_width",
+                    *("rgb/" + key for key in camera_names(metadata["config"]))):
             if key not in file or len(file[key]) != count:
                 raise ValueError(f"轨迹不完整：{key}")
     metadata.setdefault("review_history", []).append(dict(

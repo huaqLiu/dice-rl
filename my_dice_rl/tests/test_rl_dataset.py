@@ -50,7 +50,7 @@ def write_episode(root, outcome='success', reason='manual stop', simulated=True,
         frame = {key: Sample(tick - .01, 1700000000. + tick, value) for key, value in values.items()}
         writer.observation(dict(tick=tick, **frame), int(np.searchsorted(command_ticks, tick, side='right')))
     writer.finish(outcome, reason, unsafe=unsafe)
-    writer.worker.join(timeout=3.)
+    writer.worker.join(timeout=10.)
     assert writer.closed and not writer.error
     return writer.path
 

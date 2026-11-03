@@ -18,7 +18,8 @@ from my_dice_rl.env.real.policy_observation import ObservationBuffer
 from my_dice_rl.util.config import PROJECT_ROOT, project_path
 from my_dice_rl.util.auto_cycle_config import auto_cycle_config
 from my_dice_rl.util.orientation_constraint import orientation_config
-from my_dice_rl.script.collect_gui import show_rgb, QtCore, QtGui, QtWidgets
+from my_dice_rl.util.cameras import validate_camera_topics
+from my_dice_rl.script.collect_gui import CAMERA_TITLES, show_rgb, QtCore, QtGui, QtWidgets
 from my_dice_rl.script.gui_keys import bind_button_keys, install_numeric_editor_filter
 
 
@@ -27,6 +28,7 @@ def load_config(path):
     config = yaml.safe_load(path.read_text())
     collector_path = (path.parent/config.pop('collector_config')).resolve()
     collector = yaml.safe_load(collector_path.read_text())
+    validate_camera_topics(collector)
     config['data_root'] = str(project_path(config['data_root']))
     config.setdefault('inference_backend', 'process')
     if config['inference_backend'] not in ('process', 'thread'):
@@ -98,7 +100,8 @@ class RLWindow(QtWidgets.QMainWindow):
         layout.addLayout(model_row)
         previews = QtWidgets.QHBoxLayout()
         self.previews = {}
-        for key, text in (('wrist', '腕部 D435i · 策略视野'), ('external', '前方 Femto Bolt · 策略视野')):
+        for key in buffer.camera_names:
+            text = CAMERA_TITLES[key] + ' · 策略视野'
             column = QtWidgets.QVBoxLayout()
             column.addWidget(QtWidgets.QLabel(text))
             label = QtWidgets.QLabel('等待图像')
@@ -254,7 +257,7 @@ class RLWindow(QtWidgets.QMainWindow):
                 f'传入 {timing["queue_ms"]:.0f} ms · 返回 {timing["return_ms"]:.0f} ms · '
                 f'接收调度 {timing.get("poll_ms", 0):.0f} ms')
         self.path.setText('轨迹：'+status['path'])
-        if status['model'] and not self.checkpoint.text():
+        if status['model'] and not self.checkpoint.hasFocus() and self.checkpoint.text() != status['model']:
             self.checkpoint.setText(status['model'])
         if self.closing and status['can_close']:
             self.close()
@@ -290,6 +293,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default=str(PROJECT_ROOT/'cfg/execute_dp.yaml'))
     parser.add_argument('--checkpoint')
+    parser.add_argument('--data-root', help='Override rollout output folder')
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--smoke-seconds', type=float, default=0)
     parser.add_argument('--screenshot')
@@ -297,10 +301,12 @@ def main():
     if args.smoke_seconds and (not args.demo or args.smoke_seconds < 2):
         parser.error('--smoke-seconds requires --demo and at least 2 seconds')
     config, collector = load_config(args.config)
+    if args.data_root:
+        config['data_root'] = str(project_path(args.data_root))
     # Match offline timing and leave CPU capacity for the 50 Hz control thread.
     torch.set_num_threads(2)
     cv2.setNumThreads(1)
-    buffer = ObservationBuffer()
+    buffer = ObservationBuffer(collector)
     stop_event, executor, node = threading.Event(), None, None
     app = QtWidgets.QApplication(sys.argv[:1])
     if args.demo:

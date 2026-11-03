@@ -7,7 +7,8 @@ import time
 def feed_demo(buffer, backend, stop):
     while not stop.is_set():
         now = time.monotonic()
-        for key, color in (('wrist', (40, 70, 110)), ('external', (30, 95, 65))):
+        for key in buffer.camera_names:
+            color = {'wrist': (40,70,110), 'external': (30,95,65), 'side': (95,45,80)}[key]
             rgb = np.full((224, 224, 3), color, np.uint8)
             cv2.circle(rgb, (112, 112), 30, (220, 170, 40), -1)
             cv2.putText(rgb, 'SIMULATED', (20, 30), cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 255), 1)

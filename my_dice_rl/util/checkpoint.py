@@ -57,6 +57,12 @@ def policy_model_config(config, weights):
     if action_dim not in (9, 10) or result.get('action_dim', action_dim) != action_dim:
         raise ValueError('Checkpoint action_dim disagrees with normalizer weights')
     result['action_dim'] = action_dim
+    from my_dice_rl.util.cameras import camera_keys
+    stored = tuple(key for key in camera_keys({'camera_names': ['wrist', 'external', 'side']})
+                   if any(name.startswith('obs_encoder.backbones.' + key + '.') for name in weights))
+    if not stored or (result.get('camera_keys') is not None and tuple(result['camera_keys']) != stored):
+        raise ValueError('Checkpoint cameras disagree with visual backbone weights')
+    result['camera_keys'] = list(stored)
     return result
 
 

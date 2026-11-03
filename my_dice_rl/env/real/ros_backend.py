@@ -1,3 +1,4 @@
+from my_dice_rl.util.cameras import validate_camera_topics
 import json
 import time
 
@@ -58,7 +59,7 @@ class CollectorNode(Node):
         # frame to bound the pending image queue; source-age checks still apply.
         image_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                durability=DurabilityPolicy.VOLATILE)
-        for key in ("wrist", "external"):
+        for key in validate_camera_topics(config):
             topic = config[f"{key}_topic"]
             self.create_subscription(Image, topic,
                 lambda m, k=key: self.guarded(k, self.image, m, k), image_qos)

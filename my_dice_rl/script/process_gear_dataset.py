@@ -17,6 +17,7 @@ import zarr
 
 from my_dice_rl.agent.dataset.gear_dataset import DATASET_SCHEMA
 from my_dice_rl.util.config import project_path
+from my_dice_rl.util.cameras import camera_names
 from my_dice_rl.util.rotation import pose7_to_pose9
 
 COLLECTION_SCHEMA = 'dice_panda_gear_dual_rgb_v1'
@@ -35,6 +36,7 @@ def _array(file, key, count, tail):
 def _episode_values(file, metadata, hold_target_width, action_dim=9):
     count = metadata['frames']
     config = metadata['config']
+    cameras = camera_names(config)
     if count < max(2, config.get('min_episode_frames', 2)):
         raise ValueError('Successful episode is too short')
     if file.attrs.get('schema') != COLLECTION_SCHEMA or file.attrs.get('frames') != count:
@@ -57,13 +59,13 @@ def _episode_values(file, metadata, hold_target_width, action_dim=9):
         raise ValueError('Unknown gripper mode')
     if np.any((width < 0) | (width > .085)) or np.any((recorded_target < 0) | (recorded_target > .08)):
         raise ValueError('Gripper width out of range')
-    for stream in STREAMS:
+    for stream in (*cameras, 'eef', 'target', 'gripper', 'teleop', 'robot'):
         receive = _array(file, f'receive_timestamp/{stream}', count, ())
         _array(file, f'source_timestamp/{stream}', count, ())
         age = timestamp - receive
         if np.any(age < -1e-5) or np.any(age > config['max_age_s'] + 1e-4):
             raise ValueError(f'Stale/noncausal stream: {stream}')
-    skew = np.abs(file['receive_timestamp/wrist'][:] - file['receive_timestamp/external'][:])
+    skew = np.ptp(np.stack([file['receive_timestamp/' + key][:] for key in cameras]), axis=0)
     if np.any(skew > config['max_camera_skew_s'] + 1e-4):
         raise ValueError('Camera receive-time skew exceeds collection threshold')
     label_width = recorded_target.copy()
@@ -71,7 +73,7 @@ def _episode_values(file, metadata, hold_target_width, action_dim=9):
     action = pose7_to_pose9(target)
     if action_dim == 10:
         action = np.concatenate([action, label_width], axis=-1).astype(np.float32)
-    for camera in ('wrist', 'external'):
+    for camera in cameras:
         if f'rgb/{camera}' not in file or len(file[f'rgb/{camera}']) != count:
             raise ValueError(f'Missing/incomplete RGB: {camera}')
     return {
@@ -118,6 +120,7 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
     if len({item[2] for item in selected}) != 1:
         raise ValueError('Export real and simulated data to separate datasets')
     first_config = selected[0][1]['config']
+    cameras = camera_names(first_config)
     common = {key: first_config[key] for key in ('base_frame', 'ee_frame', 'record_hz')}
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + '.partial-' + uuid.uuid4().hex[:8])
@@ -127,11 +130,13 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
         root = zarr.open_group(str(temporary), mode='w')
         root.attrs.update(schema=DATASET_SCHEMA, complete=False)
         data = root.create_group('data')
-        for camera in ('wrist', 'external'):
+        for camera in cameras:
             data.create_dataset('camera_' + camera, shape=(0, 224, 224, 3),
                                 chunks=(1, 224, 224, 3), dtype='u1', compressor=compressor)
         for metadata_path, metadata, simulated in selected:
             config = metadata['config']
+            if camera_names(config) != cameras:
+                raise ValueError('Cannot mix camera layouts in one dataset: ' + str(metadata_path))
             if any(config[key] != value for key, value in common.items()):
                 raise ValueError(f'Coordinate frames or sampling frequency changed: {metadata_path}')
             trajectory = metadata_path.parent / 'trajectory.h5'
@@ -145,7 +150,7 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
                                             chunks=(256, *value.shape[1:]), dtype=value.dtype,
                                             compressor=compressor)
                     data[key].append(value, axis=0)
-                for camera in ('wrist', 'external'):
+                for camera in cameras:
                     target = data['camera_' + camera]
                     target.resize(total + count, 224, 224, 3)
                     for index in range(count):
@@ -163,11 +168,11 @@ def convert_dataset(input_path, output_path, allow_demo=False, hold_target_width
             ends.append(total)
         root.create_dataset('meta/episode_ends', data=np.asarray(ends, dtype=np.int64))
         identity = hashlib.sha256(json.dumps(dict(episodes=manifest, **common,
-                    hold_target_width=hold_target_width, action_dim=action_dim), sort_keys=True).encode()).hexdigest()
+                    hold_target_width=hold_target_width, action_dim=action_dim, camera_names=cameras), sort_keys=True).encode()).hexdigest()
         root.attrs.update(**common, schema=DATASET_SCHEMA, complete=True, dataset_id=identity,
             simulated=selected[0][2], task=task, hold_target_width=float(hold_target_width),
             rotation_convention='first two rows of rotation matrix; quaternion XYZW',
-            action_dim=action_dim,
+            action_dim=action_dim, camera_names=list(cameras),
             action_convention=('absolute XYZ + rotation6d; preserve existing grasp' if action_dim == 9 else
                                'absolute XYZ + rotation6d + total gripper target width (m)'),
             hold_label_policy='mode0 -> configured closed target; recorded width retained separately',

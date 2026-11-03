@@ -16,6 +16,7 @@ from torch.utils.data import Dataset, default_collate
 
 from my_dice_rl.util.rl_recording import SCHEMA
 from my_dice_rl.util.rotation import pose7_to_pose9
+from my_dice_rl.util.cameras import camera_names
 
 
 def _array(file, key, shape, kind=None):
@@ -88,6 +89,12 @@ class RLDataset(Dataset):
             if reason:
                 self.skipped.append(dict(path=str(metadata_path), reason=reason))
                 continue
+            names = camera_names(metadata.get('config', {}).get('collector', {}))
+            if metadata.get('camera_names') is not None and camera_names(metadata) != names:
+                raise ValueError('RL metadata camera layout disagrees with collector configuration')
+            if hasattr(self, 'camera_names') and self.camera_names != names:
+                raise ValueError('Cannot mix dual and triple camera rollouts')
+            self.camera_names = names
             rollout_path = metadata_path.with_name('rollout.h5')
             try:
                 with h5py.File(rollout_path, 'r') as file:
@@ -141,7 +148,7 @@ class RLDataset(Dataset):
                 or not isinstance(max_gripper_age, (int, float))
                 or not np.isfinite(max_gripper_age) or max_gripper_age <= 0):
             raise ValueError('Invalid recorded gripper age limit')
-        for key in ('wrist', 'external', 'eef', 'gripper', 'robot'):
+        for key in (*self.camera_names, 'eef', 'gripper', 'robot'):
             receive = _array(file, 'observations/receive/' + key, (count,))
             _array(file, 'observations/source/' + key, (count,))
             if np.any(tick - receive < -1e-6) or np.any(tick - receive > max_age + 1e-6):
@@ -156,7 +163,7 @@ class RLDataset(Dataset):
             raise ValueError('Observation receive-time skew exceeds recorded limit')
         if max_gripper_age is not None and np.any(tick-received['gripper'] > max_gripper_age + 1e-6):
             raise ValueError('Stale gripper observation exceeds recorded age limit')
-        for camera in ('wrist', 'external'):
+        for camera in self.camera_names:
             if file['observations/rgb/' + camera].shape != (count, 1):
                 raise ValueError(f'Missing/inconsistent observation RGB: {camera}')
 
@@ -214,7 +221,7 @@ class RLDataset(Dataset):
             plan_width = _array(file, 'plans/actual_gripper', history_shape)
             if np.any((plan_width < 0) | (plan_width > .085)) or (action_dim == 10 and np.any((actions[..., 9] < 0) | (actions[..., 9] > .08))):
                 raise ValueError('Invalid plan gripper width')
-            for camera in ('wrist', 'external'):
+            for camera in self.camera_names:
                 if file['plans/rgb/' + camera].shape != history_shape:
                     raise ValueError(f'Inconsistent plan RGB: {camera}')
             if command_count:
@@ -281,7 +288,7 @@ class RLDataset(Dataset):
         width = file['observations/gripper_width'][low:high][indices - low]
         obs = dict(robot_eef_pose=torch.from_numpy(pose7_to_pose9(pose)),
                    gripper_width=torch.from_numpy(width.astype(np.float32)[:, None]))
-        for camera in ('wrist', 'external'):
+        for camera in self.camera_names:
             images = {i: self._image(file['observations/rgb/' + camera][int(i), 0])
                       for i in np.unique(indices)}
             obs['camera_' + camera] = torch.stack([images[i] for i in indices])
@@ -338,7 +345,7 @@ class RLDataset(Dataset):
             width = file['plans/actual_gripper'][plan_id]
             obs = dict(robot_eef_pose=torch.from_numpy(pose7_to_pose9(pose)),
                        gripper_width=torch.from_numpy(width.astype(np.float32)[:, None]))
-            for camera in ('wrist', 'external'):
+            for camera in self.camera_names:
                 obs['camera_' + camera] = torch.stack(
                     [self._image(image) for image in file['plans/rgb/' + camera][plan_id]])
             return dict(obs=obs, predicted_action=torch.from_numpy(file['plans/actions'][plan_id].astype(np.float32)),

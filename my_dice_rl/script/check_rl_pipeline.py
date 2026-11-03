@@ -30,11 +30,12 @@ from my_dice_rl.util.rl_checkpoint import load_rl_checkpoint
 from my_dice_rl.util.rl_config import load_rl_config
 
 
-def synthetic_demonstrations(root):
+def synthetic_demonstrations(root, camera_names=('wrist', 'external')):
     for episode in range(3):
         config = dict(task='gear_insertion', simulated=True, record_hz=10., min_episode_frames=2,
             save_width=224, save_height=224, save_raw_rgb=False, jpeg_quality=95, max_age_s=.2,
             max_camera_skew_s=.06, base_frame='panda_link0', ee_frame='panda_hand_tcp')
+        config['camera_names'] = list(camera_names)
         writer = EpisodeWriter(root / 'session', config)
         for i in range(12):
             tick = 1000. + episode * 10. + i * .1
@@ -45,6 +46,8 @@ def synthetic_demonstrations(root):
                 teleop=dict(gripper_target_width=.035, gripper_busy=False, gripper_speed=.02,
                             gripper_force=5., gripper_command_mode='hold_existing'),
                 robot=dict(q=np.zeros(7), dq=np.zeros(7), wrench=np.zeros(6)))
+            if 'side' in camera_names:
+                values['side'] = np.full((224,224,3), [95,45,80], np.uint8)
             writer.append(tick, {key: Sample(tick - .01, 1700000000. + tick, value) for key, value in values.items()})
         writer.close('success')
 
@@ -52,12 +55,14 @@ def synthetic_demonstrations(root):
 def collect_simulated(policy, root, outcome='success'):
     # 只读取 YAML；不经过 GUI/ROS 启动器。
     config = yaml.safe_load((PROJECT_ROOT / 'cfg/execute_rl.yaml').read_text())
-    collector = yaml.safe_load((PROJECT_ROOT / 'cfg/collect.yaml').read_text())
+    from my_dice_rl.util.cameras import camera_names
+    names = camera_names(policy.identity['task'])
+    collector = yaml.safe_load((PROJECT_ROOT / ('cfg/collect_three.yaml' if len(names)==3 else 'cfg/collect.yaml')).read_text())
     config.pop('collector_config')
     config.update(data_root=str(root), min_free_gb=0., device_lock=str(root.parent / 'device.lock'),
                   max_inference_latency_s=2., control_timeout_s=.5, max_age_s=.4,
                   max_sensor_skew_s=.2, max_episode_s=5.)
-    buffer = ObservationBuffer()
+    buffer = ObservationBuffer(collector)
     backend = DemoBackend(buffer)
     engine = DPExecutor(config, collector, buffer, backend, simulated=True, policy=policy)
     stop = threading.Event()
@@ -97,23 +102,31 @@ def collect_simulated(policy, root, outcome='success'):
         engine.shutdown()
 
 
-def check_pipeline(output, device='cpu'):
+def check_pipeline(output, device='cpu', camera_names=('wrist', 'external'), production_model=False):
     output = Path(output).expanduser().resolve()
     if output.exists() and any(output.iterdir()):
         raise FileExistsError('Choose a new empty smoke directory: ' + str(output))
     output.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(2)
     raw, dataset = output / '_demo/raw', output / '_demo/expert.zarr'
-    synthetic_demonstrations(raw)
+    synthetic_demonstrations(raw, camera_names)
     convert_dataset(raw, dataset, allow_demo=True)
     config = load_train_config(path=Path(__file__).resolve().parents[1]/'cfg/pretrain/train_dp.yaml', overrides=['task.allow_demo=true', 'task.horizon_steps=8', 'task.act_steps=2',
         'training.device=' + device, 'training.num_workers=0', 'training.batch_size=2', 'training.epochs=1',
         'training.max_train_steps=1', 'training.max_val_steps=1', 'training.warmup_steps=0',
         'model.image_size=32', 'model.down_dims=[16,32]', 'model.time_embed_dim=16',
         'model.train_diffusion_steps=4', 'model.inference_steps=2'])
+    if production_model:
+        config['model'].update(vision_encoder='clip_vit_b32', pretrained_vision=True, vision_augment=True,
+                               frozen_vision=False, image_size=224, down_dims=[256,512,1024],
+                               time_embed_dim=256, train_diffusion_steps=50, inference_steps=16)
+        config['task'].update(horizon_steps=20, act_steps=4)
+        config['training'].update(batch_size=8, max_train_steps=2, vision_learning_rate=1e-5)
+    config['task']['camera_names'] = list(camera_names)
     config['task']['dataset_path'], config['training']['output_root'] = str(dataset), str(output / 'dp')
     teacher_checkpoint = TrainDPAgent(config).run() / 'checkpoint/best.pt'
-    collector = yaml.safe_load((PROJECT_ROOT / 'cfg/collect.yaml').read_text())
+    collector_path = PROJECT_ROOT / ('cfg/collect_three.yaml' if len(camera_names)==3 else 'cfg/collect.yaml')
+    collector = yaml.safe_load(collector_path.read_text())
     teacher = CheckpointPolicy(teacher_checkpoint, device, collector, real=False)
     rollout_root = output / 'rollouts'
     first = collect_simulated(teacher, rollout_root)
@@ -125,11 +138,14 @@ def check_pipeline(output, device='cpu'):
         'training.updates_per_round=2', 'training.min_online_chunks=1', 'training.chunk_stride=2',
         'training.checkpoint_every=2', 'training.replay_capacity=128', 'training.expert_capacity=128'],
         require_paths=False)
+    if production_model:
+        rl['model'].update(chunk_steps=4, hidden_dims=[1024,1024,1024], ensemble_size=5)
+        rl['training'].update(batch_size=32, encoding_batch_size=8)
     rl.update(teacher_checkpoint=str(teacher_checkpoint), expert_dataset=str(dataset),
               rollout_root=str(rollout_root), device_lock=str(output / 'device.lock'))
     execution = yaml.safe_load((PROJECT_ROOT / 'cfg/execute_rl.yaml').read_text())
     execution.update(device_lock=str(output / 'device.lock'),
-                     deployment_review=rl['review_config'], collector_config=str(PROJECT_ROOT / 'cfg/collect.yaml'))
+                     deployment_review=rl['review_config'], collector_config=str(collector_path))
     execution_path = output / 'execute_rl.yaml'
     execution_path.write_text(yaml.safe_dump(execution, sort_keys=False))
     rl['execution_config'] = str(execution_path)
@@ -168,7 +184,9 @@ def check_pipeline(output, device='cpu'):
     reference, _ = load_policy(teacher_checkpoint, 'cpu')
     for key, value in learner.model.teacher.state_dict().items():
         torch.testing.assert_close(value.cpu(), reference.state_dict()[key], rtol=0, atol=0)
-    report = dict(simulated=True, real_robot_commands_sent=False, device=device,
+    report = dict(simulated=True, real_robot_commands_sent=False, device=device, camera_names=list(camera_names),
+        production_model=production_model, feature_dim=reference.obs_encoder.feature_dim,
+        condition_dim=reference.obs_encoder.feature_dim*reference.obs_steps,
         teacher_checkpoint=str(teacher_checkpoint), rl_run=str(run), latest_policy_index=str(index_path),
         online_episodes=[str(first), str(second), str(third)], global_step=resumed.global_step,
         expert_chunks=resumed.replay.expert.size, online_chunks=resumed.replay.online.size,
@@ -181,10 +199,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output')
     parser.add_argument('--device', default='cpu')
+    parser.add_argument('--camera-count', type=int, choices=[2,3], default=2)
+    parser.add_argument('--production-model', action='store_true',
+                        help='Use full CLIP/UNet/1024-wide RL networks, with only a few synthetic updates')
     args = parser.parse_args()
     stamp = datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d_%H%M%S_%f')
     output = args.output or PROJECT_ROOT / 'log_dir/rl_smoke' / stamp
-    print(json.dumps(check_pipeline(output, args.device), ensure_ascii=False, indent=2))
+    print(json.dumps(check_pipeline(output, args.device, ('wrist','external','side') if args.camera_count==3 else ('wrist','external'), args.production_model), ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':

@@ -268,7 +268,7 @@ class DPExecutor:
                                for key in ('queue_ms', 'compute_ms', 'return_ms', 'poll_ms')
                                if key in self.inference_timing})
                 self.writer.put('plans', values,
-                    {key: np.stack([f[key].value for f in history]) for key in ('wrist', 'external')})
+                    {key: np.stack([f[key].value for f in history]) for key in self.buffer.camera_names})
         except Exception as exc:
             if self.state == 'RUNNING':
                 self._stop(now, str(exc), unsafe=True, diagnostics=getattr(exc, 'diagnostics', None))

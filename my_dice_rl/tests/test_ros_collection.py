@@ -1,5 +1,6 @@
 """Exercise the actual ROS sensor/TF/teleop/recorder pipeline with fake devices."""
 import json
+import pytest
 import time
 
 import h5py
@@ -22,7 +23,8 @@ from my_dice_rl.env.real.teleop import FrankaSpaceMouseTeleop
 from my_dice_rl.util.recording import Recorder, StreamBuffer
 
 
-def test_fake_ros_devices_record_real_backend(tmp_path):
+@pytest.mark.parametrize('camera_count', [2,3])
+def test_fake_ros_devices_record_real_backend(tmp_path, camera_count):
     rclpy.init(domain_id=187, args=['--ros-args', '-r', '__ns:=/dice_pipeline_test',
         '-r', '/cartesian_impedance_target:=/dice_pipeline_test/target',
         '-r', '/dice_spacemouse/joy:=/dice_pipeline_test/joy',
@@ -38,7 +40,9 @@ def test_fake_ros_devices_record_real_backend(tmp_path):
         gripper_topic='/dice_pipeline_test/gripper/joint_states',
         robot_state_topic='/dice_pipeline_test/state',
         teleop_topic='/dice_pipeline_test/dice_spacemouse_teleop/recording_state')
-    buffers = StreamBuffer()
+    config['camera_names'] = ['wrist','external'] + (['side'] if camera_count==3 else [])
+    if camera_count==3: config['side_topic']='/dice_pipeline_test/side/image_raw'
+    buffers = StreamBuffer(config)
     fake = Node('fake_devices')
     teleop = FrankaSpaceMouseTeleop()
     def controllers(request, response):
@@ -48,7 +52,7 @@ def test_fake_ros_devices_record_real_backend(tmp_path):
     fake.create_service(ListControllers, '/dice_pipeline_test/list_controllers', controllers)
     collector = CollectorNode(config, buffers)
     tf = TransformBroadcaster(fake)
-    images = [fake.create_publisher(Image, config[k + '_topic'], 10) for k in ['wrist', 'external']]
+    images = [fake.create_publisher(Image, config[k + '_topic'], 10) for k in buffers.camera_names]
     joints = fake.create_publisher(JointState, config['gripper_topic'], 10)
     state = fake.create_publisher(FrankaRobotState, config['robot_state_topic'], 10)
     joystick = fake.create_publisher(Joy, '/dice_pipeline_test/joy', 10)

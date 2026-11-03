@@ -9,11 +9,17 @@ cameras=true
 teleop=true
 gui_args=()
 execution_config="$project_root/cfg/execute_dp.yaml"
+camera_config=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --demo) demo=true; gui_args+=("$1"); shift;;
         --no-cameras) cameras=false; shift;;
         --no-teleop) teleop=false; shift;;
+        --camera-config)
+            if [ "$#" -lt 2 ]; then echo "--camera-config 需要路径" >&2; exit 2; fi
+            selected="$2"
+            if [[ "$selected" != /* ]]; then selected="$invocation_dir/$selected"; fi
+            camera_config="$(realpath -- "$selected")"; shift 2;;
         --config)
             if [ "$#" -lt 2 ]; then echo "--config 需要配置路径" >&2; exit 2; fi
             if [[ "$2" = /* ]]; then
@@ -62,7 +68,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 if [ "$cameras" = true ]; then
-    setsid /usr/bin/python3 /opt/ros/humble/bin/ros2 launch "$project_root/script/cameras.launch.py" >"$run_log/cameras.log" 2>&1 &
+    if [ -z "$camera_config" ]; then
+        camera_config="$(/usr/bin/python3 - "$execution_config" "$project_root" <<'PY_CAMERA'
+import sys, pathlib, yaml
+config = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())
+print((pathlib.Path(sys.argv[2]) / config.get('camera_config', 'cfg/cameras.yaml')).resolve())
+PY_CAMERA
+)"
+    fi
+    setsid /usr/bin/python3 /opt/ros/humble/bin/ros2 launch "$project_root/script/cameras.launch.py" "config:=$camera_config" >"$run_log/cameras.log" 2>&1 &
     pids+=("$!")
 fi
 if [ "$teleop" = true ]; then

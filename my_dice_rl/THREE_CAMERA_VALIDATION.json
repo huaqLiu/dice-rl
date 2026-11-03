@@ -1,0 +1,103 @@
+{
+  "status": "verified",
+  "camera_names": [
+    "wrist",
+    "external",
+    "side"
+  ],
+  "network": {
+    "encoder": "clip_vit_b32",
+    "pretrained": true,
+    "visual_features_per_camera": 768,
+    "features_per_frame": 2313,
+    "condition_dim": 4626,
+    "state_dim": 9,
+    "action_dim": 9,
+    "unet_down_dims": [
+      256,
+      512,
+      1024
+    ],
+    "actor_critic_hidden_dims": [
+      1024,
+      1024,
+      1024
+    ],
+    "critic_ensemble": 5
+  },
+  "tests": {
+    "command": "source /opt/ros/humble/setup.bash; source my_dice_rl/ros_ws/install/setup.bash; OMP_NUM_THREADS=2 HF_HUB_OFFLINE=1 ROS_DOMAIN_ID=187 QT_QPA_PLATFORM=offscreen my_dice_rl/.venv-dp/bin/python -m pytest my_dice_rl/tests -q",
+    "passed": 217,
+    "failed": 0,
+    "seconds": 144.03
+  },
+  "hardware_rgb": {
+    "camera_streams": {
+      "side": {
+        "frames": 699,
+        "width": 1280,
+        "height": 720,
+        "encoding": "rgb8",
+        "first": 0.07429421599954367
+      },
+      "wrist": {
+        "frames": 695,
+        "width": 640,
+        "height": 480,
+        "encoding": "rgb8",
+        "first": 0.08035599900176749
+      },
+      "external": {
+        "frames": 694,
+        "width": 1280,
+        "height": 720,
+        "encoding": "rgb8",
+        "first": 0.08522012503817677
+      }
+    },
+    "robot_commands_sent": false,
+    "missing": []
+  },
+  "production_network_roundtrip": {
+    "simulated": true,
+    "real_robot_commands_sent": false,
+    "device": "cuda:0",
+    "camera_names": [
+      "wrist",
+      "external",
+      "side"
+    ],
+    "production_model": true,
+    "feature_dim": 2313,
+    "condition_dim": 4626,
+    "teacher_checkpoint": "/tmp/dice_three_camera_validation_20261103/production_gpu/dp/20261103_153604_503788/checkpoint/best.pt",
+    "rl_run": "/tmp/dice_three_camera_validation_20261103/production_gpu/rl/20261103_153643_048287",
+    "latest_policy_index": "/tmp/dice_three_camera_validation_20261103/production_gpu/rl/20261103_153643_048287/latest_policy.json",
+    "online_episodes": [
+      "/tmp/dice_three_camera_validation_20261103/production_gpu/rollouts/_demo/gear_insertion/20261103_153629_970395",
+      "/tmp/dice_three_camera_validation_20261103/production_gpu/rollouts/_demo/gear_insertion/20261103_153631_350397",
+      "/tmp/dice_three_camera_validation_20261103/production_gpu/rollouts/_demo/gear_insertion/20261103_153725_894038"
+    ],
+    "global_step": 4,
+    "expert_chunks": 12,
+    "online_chunks": 15,
+    "frozen_teacher_unchanged": true,
+    "export_matches_learner": true,
+    "synthetic_real_deployment_rejected": true
+  },
+  "gui_checks": {
+    "drag_recording": "success: 20 frames",
+    "execution_recording": "success",
+    "three_preview_columns": true,
+    "spacemouse_recording": "success: all three RGB streams saved",
+    "rl_execution_recording": "success: all three RGB streams saved",
+    "playback": "three panels and last frame rendered"
+  },
+  "real_robot_motion_tested": false,
+  "real_three_camera_policy_trained": false,
+  "notes": [
+    "All training verification used synthetic data and cannot be deployed to real robot.",
+    "Side camera currently USB2.1; all three RGB streams received successfully.",
+    "New real demonstrations and adequate disk space are required before actual training."
+  ]
+}

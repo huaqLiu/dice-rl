@@ -46,6 +46,12 @@ def load_train_config(path=DEFAULT_TRAIN_CONFIG, overrides=()):
 
 def model_config(config):
     result = copy.deepcopy(config['model'])
+    from my_dice_rl.util.cameras import camera_keys
+    keys = camera_keys(config['task'])
+    if 'camera_keys' in result and tuple(result['camera_keys']) != keys:
+        raise ValueError('Model cameras disagree with task cameras')
+    if len(keys) == 3 or 'camera_keys' in result:
+        result['camera_keys'] = list(keys)
     result.setdefault('state_dim', 9)
     result.setdefault('action_dim', 9)
     for key in ('obs_steps', 'horizon_steps', 'act_steps'):

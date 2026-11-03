@@ -6,6 +6,7 @@ import time
 import numpy as np
 
 from my_dice_rl.util.recording import Sample
+from my_dice_rl.util.cameras import camera_names, matched_images
 
 
 class ObservationSyncError(ValueError):
@@ -18,7 +19,9 @@ class ObservationSyncError(ValueError):
 class ObservationBuffer:
     keys = ('wrist', 'external', 'eef', 'gripper', 'robot')
 
-    def __init__(self):
+    def __init__(self, config=None):
+        self.camera_names = camera_names(config)
+        self.keys = (*self.camera_names, 'eef', 'gripper', 'robot')
         self.lock = threading.RLock()
         self.buffers = {key: deque(maxlen=128) for key in self.keys}
         self.errors, self.camera_info = {}, {}
@@ -71,13 +74,11 @@ class ObservationBuffer:
                 candidates[key] = [s for s in self.buffers[key] if 0 <= tick-s.received <= max_age]
                 if not candidates[key]:
                     raise self._sync_error(f'{key}: 缺少新鲜观测', tick, max_age, max_skew)
-            pairs = [(a, b) for a in candidates['wrist'] for b in candidates['external']
-                     if abs(a.received-b.received) <= max_skew]
-            pair = min(pairs, key=lambda p: max(tick-p[0].received, tick-p[1].received), default=None)
+            pair = matched_images(candidates, self.camera_names, max_skew)
             if pair is None:
-                raise self._sync_error('双相机无法在允许时间差内配对', tick, max_age, max_skew)
+                raise self._sync_error('相机无法在允许时间差内配对', tick, max_age, max_skew)
             result = {key: candidates[key][-1] for key in ('eef', 'gripper', 'robot')}
-            result['wrist'], result['external'] = pair
+            result.update(pair)
             # Franka Hand reports at about 10 Hz, slower than images/arm state.
             # Keep the fast-stream alignment check and bound gripper age separately.
             synchronized = result if max_gripper_age is None else {k: v for k, v in result.items() if k != 'gripper'}

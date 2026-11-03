@@ -1,5 +1,7 @@
 """单机 DICE-RL learner：冻结编码器、混合回放、周期保存、按新轨迹分轮更新。"""
 import copy
+import os
+import uuid
 from datetime import datetime
 import json
 from pathlib import Path
@@ -99,6 +101,21 @@ class TrainDiceAgent:
             self._ingest(expert, expert=True)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / 'config.yaml').write_text(yaml.safe_dump(self.config, sort_keys=False, allow_unicode=True))
+        if t.get('run_alias'):
+            from my_dice_rl.util.config import PROJECT_ROOT
+            alias = Path(t['run_alias']).expanduser()
+            if not alias.is_absolute():
+                alias = PROJECT_ROOT / alias
+            alias.parent.mkdir(parents=True, exist_ok=True)
+            if alias.exists() and not alias.is_symlink():
+                raise ValueError('run_alias must be absent or a symlink, never an existing directory')
+            temporary = alias.with_name(alias.name + '.' + uuid.uuid4().hex[:8] + '.tmp')
+            try:
+                temporary.symlink_to(self.run_dir.resolve(), target_is_directory=True)
+                os.replace(temporary, alias)
+            finally:
+                temporary.unlink(missing_ok=True)
+        print('RL run directory:', self.run_dir, flush=True)
 
     def _ingest(self, dataset, expert=False):
         self.ingesting = True
@@ -137,6 +154,8 @@ class TrainDiceAgent:
             data = RLDataset(path, obs_steps=self.model.teacher.obs_steps,
                 image_size=self.teacher_payload['model_config']['image_size'],
                 allow_demo=self.config['data']['allow_demo'], task=self.teacher_payload['task']['name'])
+            if data.camera_names != tuple(key.removeprefix('camera_') for key in self.model.teacher.obs_encoder.camera_keys):
+                raise ValueError('Online rollout cameras differ from frozen DP prior')
             identity = metadata.get('policy', {})
             teacher_sha = identity.get('teacher_sha256', identity.get('sha256'))
             if teacher_sha is not None and teacher_sha != self.teacher_payload['sha256']:
@@ -239,7 +258,8 @@ class TrainDiceAgent:
                     time.sleep(t['poll_seconds'])
                     new += self.refresh_online()
                     continue
-                stop = min(self.round_stop if pending_round else self.global_step + t['updates_per_round'], t['total_updates'])
+                round_updates = t.get('initial_updates', t['updates_per_round']) if self.global_step == 0 else t['updates_per_round']
+                stop = min(self.round_stop if pending_round else self.global_step + round_updates, t['total_updates'])
                 self.round_stop = stop
                 while self.global_step < stop:
                     if not self.lease.acquire():

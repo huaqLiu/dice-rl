@@ -12,15 +12,18 @@ import numpy as np
 
 from my_dice_rl.util.recording import atomic_json, policy_image
 
+from my_dice_rl.util.cameras import camera_names
+
 SCHEMA = 'dice_panda_rl_rollout_v1'
 
 
 class RolloutWriter:
     def __init__(self, root, task, config, policy, simulated=False):
+        self.camera_names = camera_names(config.get('collector', config))
         stamp = datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d_%H%M%S_%f')
         self.path = Path(root) / ('_demo' if simulated else 'real') / task / stamp
         self.path.mkdir(parents=True, exist_ok=False)
-        self.meta = dict(schema=SCHEMA, status='recording', simulated=simulated,
+        self.meta = dict(schema=SCHEMA, camera_names=list(self.camera_names), status='recording', simulated=simulated,
             policy=policy, config=config, frames=0, transitions=0, eligible_for_rl=False,
             synchronization='causal software receive-time pairing; not exposure synchronization',
             created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
@@ -47,10 +50,10 @@ class RolloutWriter:
             joint_position=np.asarray(frame['robot'].value['q']),
             joint_velocity=np.asarray(frame['robot'].value['dq']),
             wrench=np.asarray(frame['robot'].value['wrench']), command_index=np.int64(command_index))
-        for key in ('wrist', 'external', 'eef', 'gripper', 'robot'):
+        for key in (*self.camera_names, 'eef', 'gripper', 'robot'):
             values['source/'+key] = np.float64(frame[key].source)
             values['receive/'+key] = np.float64(frame[key].received)
-        self.put('observations', values, {key: policy_image(frame[key].value) for key in ('wrist', 'external')})
+        self.put('observations', values, {key: policy_image(frame[key].value) for key in self.camera_names})
 
     def finish(self, outcome, reason, notes='', unsafe=False, diagnostics=None):
         if self.closing:

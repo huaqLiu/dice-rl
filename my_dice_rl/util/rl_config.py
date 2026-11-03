@@ -66,6 +66,10 @@ def load_rl_config(path=DEFAULT_RL_CONFIG, overrides=(), require_paths=True):
     integers += [(t, x) for x in ('torch_threads', 'batch_size', 'encoding_batch_size', 'actor_update_freq',
         'total_updates', 'updates_per_round', 'min_new_episodes', 'chunk_stride', 'checkpoint_every',
         'replay_capacity', 'expert_capacity')]
+    if 'initial_updates' in t:
+        integers.append((t, 'initial_updates'))
+    if t.get('run_alias') is not None and (not isinstance(t['run_alias'], str) or not t['run_alias'].strip()):
+        raise ValueError('training.run_alias must be a path string')
     for group, key in integers:
         if not isinstance(group[key], int) or isinstance(group[key], bool) or group[key] < 1:
             raise ValueError(key + ' must be a positive integer')

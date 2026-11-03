@@ -1,1 +1,1 @@
-"""Observation encoders for the wrist and front cameras."""
+"""Observation encoders for wrist, front and optional side cameras."""

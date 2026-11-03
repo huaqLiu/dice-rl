@@ -9,6 +9,8 @@ import zarr
 
 from my_dice_rl.agent.dataset.sequence_sampler import SequenceSampler
 
+from my_dice_rl.util.cameras import camera_keys as configured_camera_keys
+
 DATASET_SCHEMA = 'dice_gear_dp_zarr_v1'
 
 
@@ -32,6 +34,7 @@ class GearDataset(Dataset):
             raise ValueError('Dataset is incomplete or has a different schema')
         if self.metadata.get('simulated') and not allow_demo:
             raise ValueError('Simulated data requires task.allow_demo=true')
+        self.camera_keys = configured_camera_keys(self.metadata)
         self.episode_ends = np.asarray(root['meta/episode_ends'][:], dtype=np.int64)
         if not len(self.episode_ends):
             raise ValueError('Dataset contains no episodes')
@@ -45,7 +48,7 @@ class GearDataset(Dataset):
         for key, shape in [('robot_eef_pose', (9,)), ('gripper_width', (1,)), ('action', (stored_dim,))]:
             if root['data/' + key].shape != (count, *shape):
                 raise ValueError(f'Invalid dataset shape: {key}')
-        for key in ('camera_wrist', 'camera_external'):
+        for key in self.camera_keys:
             if root['data/' + key].shape != (count, 224, 224, 3):
                 raise ValueError(f'Expected 224x224 RGB: {key}')
         self.episode_ids = (list(range(len(self.episode_ends))) if episode_ids is None
@@ -77,7 +80,7 @@ class GearDataset(Dataset):
     def __getitem__(self, index):
         episode, anchor, obs_indices, act_indices, valid = self.sampler[index]
         obs = {}
-        for key in ('camera_wrist', 'camera_external'):
+        for key in self.camera_keys:
             rgb = self.read(key, obs_indices)
             if self.image_size != 224:
                 rgb = np.stack([cv2.resize(im, (self.image_size, self.image_size),
@@ -114,6 +117,8 @@ def make_datasets(task, image_size=224, action_dim=9):
                   image_size=image_size, allow_demo=task['allow_demo'], action_dim=action_dim)
     whole = GearDataset(**kwargs)
     metadata = whole.metadata
+    if whole.camera_keys != configured_camera_keys(task):
+        raise ValueError('Dataset cameras disagree with task configuration')
     if metadata['task'] != task['name']:
         raise ValueError('Dataset task disagrees with task configuration')
     for key in ('base_frame', 'ee_frame'):
